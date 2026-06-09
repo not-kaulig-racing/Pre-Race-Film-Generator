@@ -23,13 +23,14 @@ Or persistently for your user account:
 """
     data_dir() -> String
 
-Where to look for session input files (.mpg videos). Reads
-`PRERACEFILM_DATA_DIR`, then falls back to `Sample Race Data/` in the repo
-root (the legacy default), then returns `""` if neither exists.
+Resolution order: `PRERACEFILM_DATA_DIR` env var → `[paths].data_dir`
+in the TOML config → legacy `Sample Race Data/` in the repo root → `""`.
 """
 function data_dir()
     e = get(ENV, "PRERACEFILM_DATA_DIR", "")
     !isempty(e) && return e
+    c = config_get("paths", "data_dir", "")
+    c isa AbstractString && !isempty(c) && return String(c)
     legacy = abspath(joinpath(@__DIR__, "..", "Sample Race Data"))
     return isdir(legacy) ? legacy : ""
 end
@@ -37,13 +38,29 @@ end
 """
     arrow_dir() -> String
 
-Where to look for .arrow telemetry. Defaults to `PRERACEFILM_ARROW_DIR`, then
-to `data_dir()` (if both kinds live together).
+Where to look for .arrow telemetry: `PRERACEFILM_ARROW_DIR` env var →
+`[paths].arrow_dir` in the TOML config → `data_dir()`.
 """
 function arrow_dir()
     e = get(ENV, "PRERACEFILM_ARROW_DIR", "")
     !isempty(e) && return e
+    c = config_get("paths", "arrow_dir", "")
+    c isa AbstractString && !isempty(c) && return String(c)
     return data_dir()
+end
+
+"""
+    output_dir() -> String
+
+Where rendered .mp4 files go: `PRERACEFILM_OUT_DIR` env var →
+`[paths].output_dir` in the TOML config → `out/` in the repo root.
+"""
+function output_dir()
+    e = get(ENV, "PRERACEFILM_OUT_DIR", "")
+    !isempty(e) && return e
+    c = config_get("paths", "output_dir", "")
+    c isa AbstractString && !isempty(c) && return String(c)
+    return abspath(joinpath(@__DIR__, "..", "out"))
 end
 
 """

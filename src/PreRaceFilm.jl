@@ -3,6 +3,7 @@ module PreRaceFilm
 using Printf
 
 include("runtime.jl")
+include("config.jl")
 include("telemetry.jl")
 include("datadir.jl")
 include("track_map.jl")
@@ -25,7 +26,11 @@ export detect_laps,
        auto_detect_track,
        data_dir,
        arrow_dir,
+       output_dir,
        set_data_dir,
-       list_session_files
+       list_session_files,
+       load_config,
+       config_path,
+       config_get
 
 end # module

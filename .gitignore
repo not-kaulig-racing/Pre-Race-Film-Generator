@@ -13,6 +13,10 @@ deps/build.log
 # Rendered output videos — large, regenerable
 out/
 
+# Personal config — paths to wherever YOU keep race data this week.
+# A committed `config.example.toml` shows the schema.
+config.local.toml
+
 # Session inputs are NEVER committed. Point PRERACEFILM_DATA_DIR (and
 # optionally PRERACEFILM_ARROW_DIR) at wherever you actually keep them
 # — typically an external drive (e.g. D:\Race_Videos\25POC1).

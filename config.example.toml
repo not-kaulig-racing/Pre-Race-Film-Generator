@@ -1,0 +1,13 @@
+# Example config for PreRaceFilm. Copy to `config.local.toml` and edit.
+# `config.local.toml` is gitignored so your machine paths stay personal.
+
+[paths]
+data_dir   = "D:/Race_Videos/25POC1"          # this week's .mpg videos
+arrow_dir  = "D:/Race_Videos/25POC1"          # this week's .arrow telemetry
+output_dir = "out"                            # rendered overlay .mp4 files
+
+[defaults]
+driver_label    = ""
+event_label     = ""
+fps             = 25
+audio_alignment = "seed"                       # seed | none | auto
