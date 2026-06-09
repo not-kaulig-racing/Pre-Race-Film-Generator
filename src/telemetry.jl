@@ -1,0 +1,127 @@
+using Arrow
+using DataFrames
+using Tables
+using Statistics
+
+const CHANNEL_BINDING = (
+    time     = :Time,
+    lap      = :lap,
+    speed    = :OTD_Conv_Speed,
+    rpm      = :EngineRotVel,
+    gear     = :DriverGearNumber,
+    throttle = :EngineThrottlePosition,
+    brake    = :BrakePressFront,
+    steering = :DriverSteeringAngle,
+    lap_frac = :OTD_Conv_LapFraction,
+    loop     = :loop_currently_on,
+)
+
+default_ranges() = (
+    mph      = :auto,
+    rpm      = (6000.0, 9500.0),
+    gear     = (0.5, 5.5),
+    throttle = (0.0, 100.0),
+    brake    = (0.0, 900.0),
+    steering = (-320.0, 320.0),
+)
+
+"""
+    load_telemetry(arrow_path) -> NamedTuple
+
+Memory-map the arrow file and return the bound channels plus the full Arrow.Table
+so callers can read additional columns if they want.
+"""
+function load_telemetry(arrow_path::AbstractString)
+    tbl = Arrow.Table(arrow_path)
+    cols = Set(Tables.columnnames(tbl))
+    for (k, sym) in pairs(CHANNEL_BINDING)
+        sym in cols || error("Required column $sym (for $k) not found in $arrow_path")
+    end
+    return (
+        table    = tbl,
+        time     = getproperty(tbl, CHANNEL_BINDING.time),
+        lap      = getproperty(tbl, CHANNEL_BINDING.lap),
+        speed    = getproperty(tbl, CHANNEL_BINDING.speed),
+        rpm      = getproperty(tbl, CHANNEL_BINDING.rpm),
+        gear     = getproperty(tbl, CHANNEL_BINDING.gear),
+        throttle = getproperty(tbl, CHANNEL_BINDING.throttle),
+        brake    = getproperty(tbl, CHANNEL_BINDING.brake),
+        steering = getproperty(tbl, CHANNEL_BINDING.steering),
+        lap_frac = getproperty(tbl, CHANNEL_BINDING.lap_frac),
+        loop     = getproperty(tbl, CHANNEL_BINDING.loop),
+    )
+end
+
+"""
+    detect_laps(arrow_path; min_seconds=20.0, drop_partial=true) -> DataFrame
+
+Detect contiguous runs per `lap` value and return a per-lap summary.
+
+Columns: `lap`, `t_start`, `t_end`, `duration`, `row_start`, `row_end`,
+         `loop_start`, `loop_end`, `max_rpm`, `max_mph`, `is_race_lap`.
+
+`is_race_lap` is `false` for laps shorter than `min_seconds`, or with
+duration outside the median±50% band — i.e. the pit-out / cool-down /
+incomplete laps. When `drop_partial=true` (default) those rows are filtered.
+"""
+function detect_laps(arrow_path::AbstractString;
+                     min_seconds::Real = 20.0,
+                     drop_partial::Bool = true)
+    t = load_telemetry(arrow_path)
+    return detect_laps(t; min_seconds = min_seconds, drop_partial = drop_partial)
+end
+
+function detect_laps(t::NamedTuple;
+                     min_seconds::Real = 20.0,
+                     drop_partial::Bool = true)
+    lap   = t.lap
+    time  = t.time
+    rpm   = t.rpm
+    speed = t.speed
+    loop  = t.loop
+
+    n = length(lap)
+    n > 1 || return DataFrame()
+
+    rows = NamedTuple[]
+    i = 1
+    while i <= n
+        j = i
+        l = lap[j]
+        while j < n && lap[j+1] == l
+            j += 1
+        end
+        t_start = Float64(time[i])
+        t_end   = Float64(time[j])
+        dur     = t_end - t_start
+        # max RPM / MPH in this segment
+        max_r = -Inf; max_s = -Inf
+        @inbounds for k in i:j
+            r = Float64(rpm[k]);   r > max_r && (max_r = r)
+            s = Float64(speed[k]); s > max_s && (max_s = s)
+        end
+        push!(rows, (
+            lap        = Int(l),
+            t_start    = t_start,
+            t_end      = t_end,
+            duration   = dur,
+            row_start  = i,
+            row_end    = j,
+            loop_start = String(loop[i]),
+            loop_end   = String(loop[j]),
+            max_rpm    = max_r,
+            max_mph    = max_s,
+        ))
+        i = j + 1
+    end
+
+    df = DataFrame(rows)
+
+    # Classify race laps by duration band around the median
+    median_dur = isempty(df) ? 0.0 : median(df.duration)
+    lo = max(min_seconds, 0.5 * median_dur)
+    hi = 1.5 * median_dur > 0 ? 1.5 * median_dur : Inf
+    df.is_race_lap = (df.duration .>= lo) .& (df.duration .<= hi)
+
+    return drop_partial ? df[df.is_race_lap, :] : df
+end

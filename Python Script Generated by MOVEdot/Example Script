@@ -1,0 +1,434 @@
+"""
+telemetry_video/main.py
+=======================
+Telemetry overlay video renderer.
+ 
+Entry point: run(config: dict) -> dict
+ 
+See instructions.md for full config schema and methodology.
+"""
+ 
+import os
+import io
+import json
+import tempfile
+import shutil
+import subprocess
+ 
+import numpy as np
+import polars as pl
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import matplotlib.patheffects as pe
+from PIL import Image
+ 
+# ── ffmpeg binary ─────────────────────────────────────────────────────────────
+try:
+    import imageio_ffmpeg
+    FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
+except ImportError:
+    FFMPEG = 'ffmpeg'
+ 
+# ── Channel colour palette ────────────────────────────────────────────────────
+CH_COLORS = {
+    'MPH':      '#00bfff',
+    'RPM':      '#ffaa00',
+    'GEAR':     '#cc88ff',
+    'THROTTLE': '#00ee44',
+    'BRAKE':    '#ff3333',
+    'STEERING': '#ff88cc',
+}
+ 
+# ── Known track name → track_map_db.json key mappings ────────────────────────
+TRACK_KEY_MAP = {
+    'pocono':       'Pocono',
+    'michigan':     'MichiganInternationalSpeedway',
+    'dover':        'Dover',
+    'charlotte':    'Charlotte_Oval',
+    'daytona':      'Daytona',
+    'talladega':    'Talladega',
+    'kansas':       'Kansas',
+    'bristol':      'Bristol',
+    'martinsville': 'Martinsville',
+    'phoenix':      'Phoenix',
+    'las vegas':    'LasVegas',
+    'darlington':   'Darlington',
+    'watkins glen': 'WatkinsGlen',
+    'cota':         'COTA',
+    'sonoma':       'Sonoma',
+    'nashville':    'Nashville',
+    'richmond':     'Richmond',
+    'new hampshire':'NewHampshire',
+    'iowa':         'Iowa',
+    'texas':        'Texas',
+    'atlanta':      'Atlanta',
+    'homestead':    'Homestead',
+}
+ 
+ 
+def get_ffprobe_duration(video_path: str) -> float:
+    """Return video duration in seconds by probing with the ffmpeg binary."""
+    result = subprocess.run(
+        [FFMPEG, '-i', video_path],
+        capture_output=True, text=True
+    )
+    for line in result.stderr.splitlines():
+        if 'Duration' in line:
+            parts = line.strip().split('Duration:')[1].split(',')[0].strip()
+            h, m, s = parts.split(':')
+            return int(h) * 3600 + int(m) * 60 + float(s)
+    raise RuntimeError(f"Could not determine video duration for {video_path}")
+ 
+ 
+def load_track_map(track_map_db_path: str, track_key: str):
+    """
+    Load track map entry from DB. Returns (entry_dict, tx_norm, ty_norm, ts, total_dist)
+    or None if key not found.
+    """
+    if not os.path.exists(track_map_db_path):
+        return None
+    with open(track_map_db_path) as f:
+        db = json.load(f)
+    if track_key not in db:
+        return None
+    entry = db[track_key]
+    tx = np.array(entry['x'])
+    ty = np.array(entry['y'])
+    ts = np.array(entry['s'])
+    total_dist = entry.get('total_dist_ft') or ts[-1]
+    tx_n = (tx - tx.min()) / (tx.max() - tx.min())
+    ty_n = (ty - ty.min()) / (ty.max() - ty.min())
+    return entry, tx_n, ty_n, ts, total_dist
+ 
+ 
+def build_track_bg_image(tx_n, ty_n, img_w: int, img_h: int) -> np.ndarray:
+    """Pre-render static track map background as RGB numpy array."""
+    dpi = 96
+    fig = plt.figure(figsize=(img_w / dpi, img_h / dpi), dpi=dpi)
+    fig.patch.set_facecolor('black')
+    ax = fig.add_axes([0.05, 0.05, 0.90, 0.90])
+    ax.set_facecolor('black')
+    ax.plot(tx_n, ty_n, color='#666666', lw=2.5, solid_capstyle='round')
+    # S/F marker
+    ax.plot(tx_n[0], ty_n[0], 's', color='#ffee00', ms=6, zorder=5)
+    ax.set_aspect('equal')
+    ax.set_xlim(-0.05, 1.05)
+    ax.set_ylim(-0.05, 1.05)
+    ax.axis('off')
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight',
+                pad_inches=0, facecolor='black')
+    plt.close(fig)
+    buf.seek(0)
+    return np.array(Image.open(buf).convert('RGB'))
+ 
+ 
+def dist_to_map_pixel(dist_ft, ts, tx_n, ty_n, total_dist, img_shape):
+    """Convert lap distance to pixel coords in the track BG image."""
+    xp = np.interp(dist_ft % total_dist, ts, tx_n)
+    yp = np.interp(dist_ft % total_dist, ts, ty_n)
+    img_h, img_w = img_shape[:2]
+    px = int((0.05 + xp * 0.90) * img_w)
+    py = int((1 - (0.05 + yp * 0.90)) * img_h)
+    return px, py
+ 
+ 
+def interp_at(arr, t_norm_arr, t_q):
+    """Linear interpolation of arr at normalised time t_q (0-1)."""
+    idx = np.interp(t_q, t_norm_arr, np.arange(len(arr)))
+    i0 = int(np.clip(idx, 0, len(arr) - 2))
+    frac = idx - i0
+    return arr[i0] * (1 - frac) + arr[i0 + 1] * frac
+ 
+ 
+def render_frame(
+    frame_idx, video_fps, video_dur, data_dur,
+    t_norm, channels, lap_dist,
+    track_bg, ts, tx_n, ty_n, total_dist, track_map_used,
+    driver_label, event_label,
+    VIDEO_W, VIDEO_H, TOP_H, BOT_H, VIDEO_PANEL_W, MAP_PANEL_W, VALUE_COL_W,
+    DPI=96
+):
+    """Render one overlay PNG frame. Returns PNG bytes."""
+    video_t  = frame_idx / video_fps
+    t_q      = min(video_t / video_dur, 1.0)
+    data_t_s = t_q * data_dur
+ 
+    # Current channel values
+    cur = {ch['name']: interp_at(ch['data'], t_norm, t_q) for ch in channels}
+    cur_dist = interp_at(lap_dist, t_norm, t_q)
+ 
+    fig = plt.figure(figsize=(VIDEO_W / DPI, VIDEO_H / DPI), dpi=DPI)
+    fig.patch.set_alpha(0.0)  # transparent — video shows through top-left
+ 
+    # ── Top-right map panel ───────────────────────────────────────────────
+    map_ax_rect = [VIDEO_PANEL_W / VIDEO_W, BOT_H / VIDEO_H,
+                   MAP_PANEL_W / VIDEO_W,   TOP_H / VIDEO_H]
+    ax_map = fig.add_axes(map_ax_rect)
+    ax_map.set_facecolor('black')
+    ax_map.patch.set_alpha(1.0)
+ 
+    if track_map_used and track_bg is not None:
+        ax_map.imshow(track_bg, aspect='auto', origin='upper',
+                      extent=[0, track_bg.shape[1], 0, track_bg.shape[0]])
+        px, py = dist_to_map_pixel(cur_dist, ts, tx_n, ty_n, total_dist, track_bg.shape)
+        py_flip = track_bg.shape[0] - py
+        ax_map.plot(px, py_flip, 'o', color='#ffee00', ms=9, zorder=10,
+                    markeredgecolor='white', markeredgewidth=0.8)
+        ax_map.set_xlim(0, track_bg.shape[1])
+        ax_map.set_ylim(0, track_bg.shape[0])
+ 
+    ax_map.axis('off')
+ 
+    # Lap timer
+    mins = int(data_t_s // 60)
+    secs = data_t_s % 60
+    ax_map.text(0.02, 0.98, f"{mins}:{secs:05.2f}",
+                color='#ffee00', fontsize=11, fontweight='bold',
+                va='top', ha='left', transform=ax_map.transAxes,
+                fontfamily='monospace',
+                path_effects=[pe.withStroke(linewidth=2, foreground='black')])
+    ax_map.text(0.02, 0.88, driver_label,
+                color='white', fontsize=8, fontweight='bold',
+                va='top', ha='left', transform=ax_map.transAxes,
+                path_effects=[pe.withStroke(linewidth=1.5, foreground='black')])
+    ax_map.text(0.02, 0.81, event_label,
+                color='#888888', fontsize=7,
+                va='top', ha='left', transform=ax_map.transAxes)
+ 
+    # ── Telemetry trace area ──────────────────────────────────────────────
+    telem_rect = [0, 0, (VIDEO_W - VALUE_COL_W) / VIDEO_W, BOT_H / VIDEO_H]
+    val_rect   = [(VIDEO_W - VALUE_COL_W) / VIDEO_W, 0,
+                  VALUE_COL_W / VIDEO_W, BOT_H / VIDEO_H]
+ 
+    ax_telem = fig.add_axes(telem_rect)
+    ax_val   = fig.add_axes(val_rect)
+ 
+    ax_telem.set_facecolor('#111111')
+    ax_telem.patch.set_alpha(1.0)
+    ax_val.set_facecolor('#111111')
+    ax_val.patch.set_alpha(1.0)
+ 
+    N_CH  = len(channels)
+    row_h = 1.0 / N_CH
+ 
+    for i, ch in enumerate(channels):
+        y_bot = (N_CH - 1 - i) * row_h
+        y_top = y_bot + row_h
+        y_mid = (y_bot + y_top) / 2
+        color = CH_COLORS[ch['name']]
+ 
+        if i > 0:
+            ax_telem.axhline(y=y_bot, color='#2a2a2a', lw=0.8)
+ 
+        # Trace
+        y_trace = y_bot + ch['norm'] * row_h * 0.85 + row_h * 0.075
+        ax_telem.plot(t_norm, y_trace, color=color, lw=1.2, alpha=0.9)
+ 
+        # Cursor dot
+        cur_y = y_bot + float(np.clip(interp_at(ch['norm'], t_norm, t_q), 0, 1)) * row_h * 0.85 + row_h * 0.075
+        ax_telem.plot(t_q, cur_y, 'o', color=color, ms=5, zorder=10)
+ 
+        # Channel label
+        label = ch['name']
+        if ch.get('unit'):
+            label += ' ' + ch['unit']
+        ax_telem.text(0.005, y_mid, label, color=color,
+                      fontsize=7, fontweight='bold', va='center',
+                      transform=ax_telem.transAxes,
+                      path_effects=[pe.withStroke(linewidth=1.5, foreground='black')])
+ 
+    # Vertical red cursor
+    ax_telem.axvline(x=t_q, color='#ff2222', lw=1.5, alpha=0.9, zorder=8)
+    ax_telem.set_xlim(0, 1)
+    ax_telem.set_ylim(0, 1)
+    ax_telem.axis('off')
+ 
+    # ── Value column ──────────────────────────────────────────────────────
+    ax_val.set_xlim(0, 1)
+    ax_val.set_ylim(0, 1)
+    ax_val.axis('off')
+ 
+    for i, ch in enumerate(channels):
+        y_bot = (N_CH - 1 - i) / N_CH
+        y_top = y_bot + 1 / N_CH
+        color = CH_COLORS[ch['name']]
+ 
+        ax_val.text(0.08, y_top - 0.01, ch['name'],
+                    color='#aaaaaa', fontsize=7, fontweight='bold',
+                    va='top', ha='left')
+ 
+        val = cur[ch['name']]
+        # Gear: always whole integer
+        if ch['name'] == 'GEAR':
+            val_str = str(int(round(max(1, min(5, val)))))
+        else:
+            val_str = ch['fmt'].format(val)
+ 
+        ax_val.text(0.08, y_bot + (1 / N_CH) * 0.45, val_str,
+                    color=color, fontsize=18, fontweight='bold',
+                    va='center', ha='left', fontfamily='monospace',
+                    path_effects=[pe.withStroke(linewidth=2, foreground='black')])
+ 
+    # Save frame
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=DPI, bbox_inches='tight',
+                pad_inches=0, transparent=True)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+ 
+ 
+def run(config: dict) -> dict:
+    """
+    Main entry point.
+ 
+    Required config keys: lap_parquet_path, video_path, output_path,
+                          driver_label, event_label, lap_number, lap_time_s
+    Optional: track_map_entry, video_fps, output_width, output_height,
+              top_height_frac, video_panel_frac, value_col_width
+    """
+    # ── Resolve config ────────────────────────────────────────────────────
+    lap_parquet = config['lap_parquet_path']
+    video_path  = config['video_path']
+    output_path = config['output_path']
+    driver_label = config['driver_label']
+    event_label  = config['event_label']
+    lap_number   = config['lap_number']
+    lap_time_s   = config['lap_time_s']
+ 
+    track_map_entry = config.get('track_map_entry')  # None = no map
+ 
+    VIDEO_FPS       = config.get('video_fps', 25)
+    VIDEO_W         = config.get('output_width', 1280)
+    VIDEO_H         = config.get('output_height', 720)
+    TOP_FRAC        = config.get('top_height_frac', 0.55)
+    VID_FRAC        = config.get('video_panel_frac', 0.62)
+    VALUE_COL_W     = config.get('value_col_width', 160)
+    DPI             = 96
+ 
+    TOP_H         = int(VIDEO_H * TOP_FRAC)
+    BOT_H         = VIDEO_H - TOP_H
+    VIDEO_PANEL_W = int(VIDEO_W * VID_FRAC)
+    MAP_PANEL_W   = VIDEO_W - VIDEO_PANEL_W
+ 
+    # ── Load telemetry ────────────────────────────────────────────────────
+    df = pl.read_parquet(lap_parquet)
+    t_raw    = df['Alias Time'].to_numpy()
+    data_dur = t_raw.max() - t_raw.min()
+    t_norm   = (t_raw - t_raw.min()) / data_dur
+ 
+    speed    = df['Corr Speed'].to_numpy()
+    rpm      = df['Alias Engine RPM'].to_numpy()
+    gear     = df['Alias Gear'].to_numpy()
+    throttle = df['Alias Throttle Pedal'].to_numpy()
+    brake    = df['Alias Brake Pressure Front'].to_numpy()
+    steering = df['Alias Steering Angle'].to_numpy()
+    lap_dist = df['Corr Lap Dist'].to_numpy()
+ 
+    # Auto MPH range
+    spd_min = max(0, int((speed.min() - 10) / 10) * 10)
+    spd_max = int((speed.max() + 10) / 10) * 10
+ 
+    raw_channels = [
+        {'name': 'MPH',      'data': speed,    'ymin': spd_min, 'ymax': spd_max, 'unit': '',    'fmt': '{:.0f}'},
+        {'name': 'RPM',      'data': rpm,      'ymin': 6000,    'ymax': 9500,    'unit': '',    'fmt': '{:.0f}'},
+        {'name': 'GEAR',     'data': gear,     'ymin': 0.5,     'ymax': 5.5,     'unit': '',    'fmt': '{:.0f}'},
+        {'name': 'THROTTLE', 'data': throttle, 'ymin': 0,       'ymax': 100,     'unit': '%',   'fmt': '{:.0f}'},
+        {'name': 'BRAKE',    'data': brake,    'ymin': 0,       'ymax': 600,     'unit': 'PSI', 'fmt': '{:.0f}'},
+        {'name': 'STEERING', 'data': steering, 'ymin': -35,     'ymax': 35,      'unit': '°',   'fmt': '{:+.1f}'},
+    ]
+    for ch in raw_channels:
+        ch['norm'] = np.clip(
+            (ch['data'] - ch['ymin']) / (ch['ymax'] - ch['ymin']), 0, 1
+        )
+ 
+    # ── Video duration ────────────────────────────────────────────────────
+    video_dur = get_ffprobe_duration(video_path)
+    print(f"Video duration: {video_dur:.3f}s  |  Data duration: {data_dur:.3f}s")
+ 
+    # ── Track map ─────────────────────────────────────────────────────────
+    track_map_used = False
+    track_bg = None
+    ts = tx_n = ty_n = total_dist = None
+ 
+    if track_map_entry is not None:
+        tx = np.array(track_map_entry['x'])
+        ty = np.array(track_map_entry['y'])
+        ts = np.array(track_map_entry['s'])
+        total_dist = track_map_entry.get('total_dist_ft') or ts[-1]
+        tx_n = (tx - tx.min()) / (tx.max() - tx.min())
+        ty_n = (ty - ty.min()) / (ty.max() - ty.min())
+        track_bg = build_track_bg_image(tx_n, ty_n, MAP_PANEL_W - 20, TOP_H - 20)
+        track_map_used = True
+        print(f"Track map loaded: {track_bg.shape}")
+    else:
+        print("No track map — rendering without mini-map.")
+ 
+    # ── Render frames ─────────────────────────────────────────────────────
+    TOTAL_FRAMES = int(video_dur * VIDEO_FPS)
+    print(f"Rendering {TOTAL_FRAMES} frames at {VIDEO_W}x{VIDEO_H}...")
+ 
+    tmpdir    = tempfile.mkdtemp(prefix='telem_vid_')
+    frame_dir = os.path.join(tmpdir, 'frames')
+    os.makedirs(frame_dir)
+ 
+    try:
+        for i in range(TOTAL_FRAMES):
+            if i % 100 == 0:
+                print(f"  Frame {i}/{TOTAL_FRAMES} ({100*i/TOTAL_FRAMES:.1f}%)")
+            png = render_frame(
+                i, VIDEO_FPS, video_dur, data_dur,
+                t_norm, raw_channels, lap_dist,
+                track_bg, ts, tx_n, ty_n, total_dist, track_map_used,
+                driver_label, event_label,
+                VIDEO_W, VIDEO_H, TOP_H, BOT_H, VIDEO_PANEL_W, MAP_PANEL_W, VALUE_COL_W,
+                DPI=DPI
+            )
+            with open(os.path.join(frame_dir, f'frame_{i:05d}.png'), 'wb') as f:
+                f.write(png)
+ 
+        print("All frames rendered. Compositing...")
+ 
+        # ── ffmpeg composite ──────────────────────────────────────────────
+        cmd = [
+            FFMPEG, '-y',
+            '-i', video_path,
+            '-framerate', str(VIDEO_FPS),
+            '-i', os.path.join(frame_dir, 'frame_%05d.png'),
+            '-filter_complex',
+            f'[0:v]scale={VIDEO_PANEL_W}:{TOP_H}[vid];'
+            f'color=black:{VIDEO_W}x{VIDEO_H}[bg];'
+            f'[bg][vid]overlay=0:0[bgv];'
+            f'[bgv][1:v]overlay=0:0[v]',
+            '-map', '[v]',
+            '-map', '0:a',
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '18',
+            '-c:a', 'aac',
+            '-b:a', '192k',
+            '-shortest',
+            output_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg failed:\n{result.stderr[-2000:]}")
+ 
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+ 
+    size_mb = os.path.getsize(output_path) / 1e6
+    print(f"Done: {output_path}  ({size_mb:.1f} MB)")
+ 
+    return {
+        'output_path':    output_path,
+        'file_size_mb':   size_mb,
+        'total_frames':   TOTAL_FRAMES,
+        'lap_time_s':     lap_time_s,
+        'lap_number':     lap_number,
+        'track_map_used': track_map_used,
+    }
+ 

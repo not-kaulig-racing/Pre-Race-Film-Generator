@@ -1,0 +1,25 @@
+# Julia
+.jl_scratch/
+*.cov
+*.jl.cov
+*.jl.mem
+deps/build.log
+
+# Manifest.toml is debatable — uncomment if you want each contributor to
+# resolve their own dependency versions. For a single-team app keep it
+# committed so everyone runs the exact same package versions.
+# Manifest.toml
+
+# Rendered output videos — large, regenerable
+out/
+
+# Session inputs are NEVER committed. Point PRERACEFILM_DATA_DIR (and
+# optionally PRERACEFILM_ARROW_DIR) at wherever you actually keep them
+# — typically an external drive (e.g. D:\Race_Videos\25POC1).
+Sample Race Data/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/settings.json
+*.swp

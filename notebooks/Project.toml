@@ -1,0 +1,7 @@
+[deps]
+HypertextLiteral = "ac1192a8-f4b3-4bfe-ba22-af5b92cd3ab2"
+PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
+PreRaceFilm = "5e1a2b6a-1f6e-4a4f-9c5e-8a1d3f9c0a01"
+
+[sources]
+PreRaceFilm = {path = ".."}
