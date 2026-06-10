@@ -6,6 +6,7 @@ include("runtime.jl")
 include("config.jl")
 include("telemetry.jl")
 include("datadir.jl")
+include("race.jl")
 include("track_map.jl")
 include("alignment.jl")
 include("render.jl")
@@ -31,6 +32,18 @@ export detect_laps,
        list_session_files,
        load_config,
        config_path,
-       config_get
+       config_get,
+       RaceConfig,
+       getConfig,
+       process,
+       render_lap,
+       stem_for,
+       video_stem_for,
+       arrow_stem_for,
+       driver_for,
+       car_override,
+       event_label_default,
+       list_cars,
+       find_car_session
 
 end # module

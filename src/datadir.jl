@@ -54,13 +54,22 @@ end
 
 Where rendered .mp4 files go: `PRERACEFILM_OUT_DIR` env var →
 `[paths].output_dir` in the TOML config → `out/` in the repo root.
+
+Always returns an absolute path — relative paths from env vars or config
+are resolved against the repo root, so the answer doesn't depend on the
+caller's current working directory.
 """
 function output_dir()
-    e = get(ENV, "PRERACEFILM_OUT_DIR", "")
-    !isempty(e) && return e
-    c = config_get("paths", "output_dir", "")
-    c isa AbstractString && !isempty(c) && return String(c)
-    return abspath(joinpath(@__DIR__, "..", "out"))
+    raw = let
+        e = get(ENV, "PRERACEFILM_OUT_DIR", "")
+        if !isempty(e)
+            e
+        else
+            c = config_get("paths", "output_dir", "")
+            (c isa AbstractString && !isempty(c)) ? String(c) : "out"
+        end
+    end
+    return isabspath(raw) ? raw : abspath(joinpath(@__DIR__, "..", raw))
 end
 
 """

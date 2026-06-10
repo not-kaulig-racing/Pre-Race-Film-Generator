@@ -31,6 +31,7 @@ function generate_lap_video(video_path::AbstractString,
                             fps::Int = 25,
                             resolution::Tuple{Int,Int} = (1280, 720),
                             audio_alignment::Union{Symbol,Real} = _config_alignment(),
+                            fine_tune_s::Real = 0.0,
                             ranges = default_ranges(),
                             encoder::Symbol = :auto,
                             progress::Union{Nothing,Function} = nothing)
@@ -47,8 +48,14 @@ function generate_lap_video(video_path::AbstractString,
     t_tel_start = lap.t_start
     lap_dur     = lap.duration
 
-    # Audio alignment
-    offset_s, align_meta = _resolve_alignment(audio_alignment, video_path, arrow_path, backend)
+    # Audio alignment + manual fine-tune
+    raw_offset_s, align_meta = _resolve_alignment(audio_alignment, video_path, arrow_path, backend)
+    offset_s = raw_offset_s + Float64(fine_tune_s)
+    align_meta = merge(align_meta, (
+        raw_offset_s   = raw_offset_s,
+        fine_tune_s    = Float64(fine_tune_s),
+        final_offset_s = offset_s,
+    ))
 
     # Map telemetry window → video window
     video_lap_start = t_tel_start - offset_s
