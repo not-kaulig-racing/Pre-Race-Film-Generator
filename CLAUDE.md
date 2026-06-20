@@ -43,11 +43,16 @@ windows converged on −208.5); ovals need a seed.
 `:visual`):** `align_forward_speed` / `video_forward_track` — a speed PROXY
 (inter-frame change in a foreground crop) correlated, UNFILTERED (only smoothed,
 never band-passed — the band-pass would delete the slow session envelope that
-makes it unique), against `VectorGPS_Speed`. It's the COARSE lap-fixer, not a
-precise locker: on San Diego it landed within ~25 s of the −208.5 truth (broad
-peak, picked a near-tied neighbour) — enough to seed the yaw/pitch fine refine,
-not enough to trust standalone. Slow (decodes a long window); 4 fps is a
-slideshow — higher fps / a better window is the obvious next iteration.
+makes it unique), against `VectorGPS_Speed`.
+
+**Intended direction:** a THIRD full-fidelity convergence axis alongside
+audio↔RPM and visual-rotation — not a coarse seed. Today it's coarse: at 4 fps
+(a slideshow) over a long window it landed within ~25 s of the −208.5 truth
+(broad peak, picked a near-tied neighbour). To make it a standalone locker, crank
+fps/resolution and a sharper speed proxy (the inter-frame-diff metric is
+rotation-contaminated in slow corners), then it should lock precisely and
+converge with the other two — burn the compute, it's worth a third independent
+estimator. Decode of the long window is the cost.
 
 ## Telemetry channels (2026 format)
 `CHANNEL_BINDING` in `src/telemetry.jl`. 2026 arrows renamed some channels:

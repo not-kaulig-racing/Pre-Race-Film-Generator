@@ -5,6 +5,23 @@ using Statistics
 using LinearAlgebra: mul!
 
 """
+    AlignEstimate(offset_s, confidence, method, detail)
+
+Common output of every alignment estimator — audio↔RPM, visual rotation, and
+forward Fourier-Mellin — so the three can be compared as independent points in a
+spread (convergence = confidence). Sign convention: `telemetry_time = video_time
++ offset_s`. `confidence` is the peak quality; `method` is the estimator's tag;
+`detail` is a NamedTuple of method-specific extras (candidate peaks, per-channel
+offsets, margins, …).
+"""
+struct AlignEstimate
+    offset_s::Float64
+    confidence::Float64
+    method::Symbol
+    detail::NamedTuple
+end
+
+"""
     extract_audio_mono(video_path; start_s, duration_s, sr=8000,
                        backend=detect_backend()) -> Vector{Float32}
 
@@ -526,20 +543,17 @@ function align_audio_rpm(video_path::AbstractString,
     coarse_offset_s = t0_tel - best_k / frame_hz
     offset_s        = t0_tel - (best_k + subshift) / frame_hz
 
-    return (
-        offset_s          = offset_s,
-        confidence        = conf,
+    return AlignEstimate(offset_s, conf, :audio_rpm, (
         lag_samples       = best_k,
         coarse_offset_s   = coarse_offset_s,
         subsample_shift_s = offset_s - coarse_offset_s,
         frame_hz          = frame_hz,
-        active_frames    = count(>(e_thresh), a.energy),
-        total_frames     = length(a.energy),
-        session_offset_s = session_offset_s,
-        session_seed_ok  = have_session_seed,
-        used_fallback    = fallback,
-        candidate_peaks  = [(lag = lag, offset_s = t0_tel - lag / frame_hz, conf = val)
-                            for (lag, val) in peaks],
-        method           = :spectral_xcorr_session_disambiguated,
-    )
+        active_frames     = count(>(e_thresh), a.energy),
+        total_frames      = length(a.energy),
+        session_offset_s  = session_offset_s,
+        session_seed_ok   = have_session_seed,
+        used_fallback     = fallback,
+        candidate_peaks   = [(lag = lag, offset_s = t0_tel - lag / frame_hz, conf = val)
+                             for (lag, val) in peaks],
+    ))
 end

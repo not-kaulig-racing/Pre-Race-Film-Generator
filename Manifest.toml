@@ -2,7 +2,7 @@
 
 julia_version = "1.12.5"
 manifest_format = "2.0"
-project_hash = "8c7a543c954a627f6b6d6c98e6287cc1365cc6a1"
+project_hash = "d86ede91a8dcca26ad6fc78528e31710aa363fc9"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -629,6 +629,11 @@ version = "3.3.2"
 [[deps.Printf]]
 deps = ["Unicode"]
 uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+version = "1.11.0"
+
+[[deps.Profile]]
+deps = ["StyledStrings"]
+uuid = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
 version = "1.11.0"
 
 [[deps.REPL]]

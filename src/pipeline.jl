@@ -263,6 +263,15 @@ Translate the `audio_alignment` argument into a concrete offset in seconds.
 - `Float64 n` — manual override, use as-is
 """
 function _resolve_alignment(spec, video_path, arrow_path, backend)
+    # TODO: migrate this symbol if/elseif chain to multiple dispatch — an abstract
+    # `AlignMode` with concrete `Auto`/`Visual`/`Forward`/`Seed`/`None`/`Manual(x)`
+    # types and a `_resolve_alignment(::Auto, …)` method each. Kills the branch
+    # ladder, makes adding an estimator a new method, and types the spec properly.
+    # TODO: split `:visual` into independent YAW, PITCH, and FORWARD estimators —
+    # four axes total (audio-RPM, yaw, pitch, forward), each its own point in the
+    # spread, instead of bundling yaw+pitch into one joint lock.
+    # TODO: give the user-facing symbols more descriptive names (`:auto` → e.g.
+    # `:audio_rpm`, `:visual` → `:rotation`). Keep the current API for now.
     if spec === :none
         return 0.0, (mode = :none,)
     elseif spec isa Real
@@ -278,11 +287,17 @@ function _resolve_alignment(spec, video_path, arrow_path, backend)
                         audio_active_vid_s = audio_active,
                         offset_s = offset)
     elseif spec === :auto
-        m = align_audio_rpm(video_path, arrow_path)
-        return m.offset_s, merge((mode = :auto,), m)
+        est = align_audio_rpm(video_path, arrow_path)
+        return est.offset_s, merge((mode = :auto, offset_s = est.offset_s,
+                                    confidence = est.confidence, method = est.method), est.detail)
     elseif spec === :visual
-        m = align_visual_rotation(video_path, arrow_path; backend = backend)
-        return m.offset_s, merge((mode = :visual,), m)
+        est = align_visual_rotation(video_path, arrow_path; backend = backend)
+        return est.offset_s, merge((mode = :visual, offset_s = est.offset_s,
+                                    confidence = est.confidence, method = est.method), est.detail)
+    elseif spec === :forward
+        est = align_forward_speed(video_path, arrow_path; backend = backend)
+        return est.offset_s, merge((mode = :forward, offset_s = est.offset_s,
+                                    confidence = est.confidence, method = est.method), est.detail)
     else
         error("Unknown audio_alignment: $spec")
     end
