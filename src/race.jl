@@ -43,7 +43,7 @@ driver_for(cfg::RaceConfig, car::Integer) =
 """
     car_override(cfg::RaceConfig, car::Integer, key::AbstractString; default=nothing)
 
-Pull a per-car override value (e.g. `"audio_alignment"`).
+Pull a per-car override value (e.g. `"alignment_method"`, `"stem"`).
 """
 function car_override(cfg::RaceConfig, car::Integer, key::AbstractString;
                       default = nothing)
@@ -99,7 +99,7 @@ function find_car_session(cfg::RaceConfig, car::Integer)
         return (car = Int(car), video = video, arrow = arrow, name = vs)
     end
 
-    df = list_session_files(data = cfg.data_dir, arrow = cfg.arrow_dir)
+    df = list_session_files(cfg)
     nrow(df) > 0 || error("No session files in $(cfg.data_dir)")
     pattern = Regex("car0*$(Int(car))(?:[^0-9]|\$)", "i")
     candidates = filter(r -> occursin(pattern, r.name), eachrow(df))
@@ -112,20 +112,25 @@ end
 # ── Entry points ───────────────────────────────────────────────────────────
 
 """
-    process(cfg::RaceConfig; cars=:all, laps=:all, overwrite=false, kwargs...)
+    process(cfg::RaceConfig; cars=:all, laps=:all, alignment_method=nothing,
+            overwrite=false, kwargs...)
 
 Top-level entry point. Render every (car, lap) combination described by
-`cfg`. Audio alignment is computed once per car and reused across that
+`cfg`. The alignment method is resolved once per car (explicit kwarg → per-car
+`race.toml` → race-wide `race.toml`) into a concrete offset reused across that
 car's laps. Returns a vector of result NamedTuples (one per render).
 
 - `cars`: `:all` (every car in `cfg.drivers`) or a vector of car numbers
 - `laps`: `:all` (every race lap detected in each car's arrow) or a vector
+- `alignment_method`: `:seed | :audio | :visual | <offset_s>` — errors if it is
+  set neither here nor in `race.toml`
 - `overwrite`: re-render even if the output file exists
 - Extra `kwargs` (e.g. `fps = 30`) flow through to `generate_lap_video`.
 """
 function process(cfg::RaceConfig;
                  cars::Union{Symbol,AbstractVector{<:Integer}} = :all,
                  laps::Union{Symbol,AbstractVector{<:Integer}} = :all,
+                 alignment_method = nothing,
                  overwrite::Bool = false,
                  kwargs...)
     cars_list = cars === :all ? list_cars(cfg) : Int.(collect(cars))
@@ -138,13 +143,15 @@ function process(cfg::RaceConfig;
     for car in cars_list
         session = find_car_session(cfg, car)
 
-        # One alignment per car: bake-in override > FFT once > pass through
-        align = car_override(cfg, car, "audio_alignment")
-        if align === nothing
-            @info "Computing audio alignment for $(driver_for(cfg, car)) (car #$car)…"
-            align = align_audio_rpm(session.video, session.arrow).offset_s
-            @info "  offset = $(round(align; digits=2)) s"
-        end
+        # Resolve the method once per car → a concrete offset reused across laps.
+        m = something(alignment_method, car_override(cfg, car, "alignment_method"),
+                      cfg.alignment_method, Some(nothing))
+        m === nothing && error(
+            "No alignment_method for car #$car. Pass alignment_method = " *
+            ":seed | :audio | :visual | <offset_s>, or set it in race.toml.")
+        @info "Aligning $(driver_for(cfg, car)) (car #$car) via `$m`…"
+        offset = _resolve_alignment(m, session.video, session.arrow).offset_s
+        @info "  offset = $(round(offset; digits = 2)) s"
 
         car_laps = laps === :all ?
             collect(detect_laps(session.arrow).lap) :
@@ -152,7 +159,7 @@ function process(cfg::RaceConfig;
 
         for lap in car_laps
             push!(results, generate_lap_video(cfg, car, lap;
-                audio_alignment = align,
+                alignment_method = offset,   # numeric → used as-is, not recomputed
                 overwrite = overwrite,
                 kwargs...))
         end

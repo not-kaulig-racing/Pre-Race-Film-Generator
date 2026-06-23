@@ -6,22 +6,26 @@ using Printf
     generate_lap_video(cfg::RaceConfig, car::Integer, lap::Integer;
                        fps=25, resolution=(1280,720), template=:full,
                        track=:auto, track_map_db=default_db_path(),
-                       ranges=default_ranges(), audio_alignment=nothing,
+                       ranges=default_ranges(), alignment_method=nothing,
                        fine_tune_s=nothing, overwrite=false, progress=nothing)
         -> NamedTuple
 
 The entry point. Resolves the session files, driver/event labels, per-car
-overrides, and output path from `cfg`, then detects the lap, aligns the video
-to telemetry via audio↔RPM cross-correlation (unless `audio_alignment` gives a
-precomputed offset — e.g. from `process`), trims the source clip, renders Cairo
+overrides, and output path from `cfg`, then detects the lap, aligns the video to
+telemetry by the chosen `alignment_method`, trims the source clip, renders Cairo
 overlay frames, and pipes everything through a single ffmpeg invocation.
+
+`alignment_method` is `:seed | :audio | :visual | <offset_s>`, resolved as
+explicit kwarg → per-car `race.toml` → race-wide `race.toml`. It is **required** —
+if set nowhere, this errors rather than guessing. `process` resolves it once per
+car and passes the offset back in.
 
 Returns `(; output_path, skipped=true)` without rendering if the output already
 exists and `overwrite=false`.
 
     cfg = getConfig("25POC1")            # or getConfig() for [current].race
-    generate_lap_video(cfg, 9, 119; template = :minimal)
-    process(cfg; cars = [9], laps = :all)   # batch
+    generate_lap_video(cfg, 9, 119; alignment_method = :audio, template = :minimal)
+    process(cfg; cars = [9], laps = :all, alignment_method = :seed)   # batch
 """
 function generate_lap_video(cfg::RaceConfig, car::Integer, lap::Integer;
                             fps::Int = 25,
@@ -30,7 +34,7 @@ function generate_lap_video(cfg::RaceConfig, car::Integer, lap::Integer;
                             track::Union{Nothing,Symbol,AbstractString} = :auto,
                             track_map_db::AbstractString = default_db_path(),
                             ranges = default_ranges(),
-                            audio_alignment = nothing,
+                            alignment_method = nothing,
                             fine_tune_s = nothing,
                             overwrite::Bool = false,
                             progress::Union{Nothing,Function} = nothing)
@@ -50,7 +54,14 @@ function generate_lap_video(cfg::RaceConfig, car::Integer, lap::Integer;
     event_label  = let e = event_label_default(cfg)
         isempty(e) ? something(auto_detect_track(arrow_path), "") : e
     end
-    audio_alignment = something(audio_alignment, car_override(cfg, car, "audio_alignment"), :seed)
+    method = something(alignment_method,                              # explicit kwarg wins
+                       car_override(cfg, car, "alignment_method"),    # then per-car race.toml
+                       cfg.alignment_method,                          # then race-wide race.toml
+                       Some(nothing))
+    method === nothing && error(
+        "No alignment_method for car #$car. Choose one explicitly — " *
+        "pass alignment_method = :seed | :audio | :visual | <offset_s>, or set " *
+        "`alignment_method` in race.toml (race-wide or under [cars.$car]).")
     ft_ov = car_override(cfg, car, "fine_tune_s")
     fine_tune_s = fine_tune_s !== nothing ? Float64(fine_tune_s) :
                   ft_ov       !== nothing ? Float64(ft_ov) : -0.70
@@ -69,8 +80,8 @@ function generate_lap_video(cfg::RaceConfig, car::Integer, lap::Integer;
     t_tel_start = lap.t_start
     lap_dur     = lap.duration
 
-    # Audio alignment + manual fine-tune
-    est = _resolve_alignment(audio_alignment, video_path, arrow_path)
+    # Resolve the chosen method to a concrete offset + manual fine-tune
+    est = _resolve_alignment(method, video_path, arrow_path)
     raw_offset_s = est.offset_s
     offset_s = raw_offset_s + Float64(fine_tune_s)
     align_meta = merge((mode = est.method, confidence = est.confidence,
@@ -233,7 +244,7 @@ _require_file(path::AbstractString, kind::AbstractString) =
 """
     _resolve_alignment(spec, video_path, arrow_path) -> AlignEstimate
 
-Translate the `audio_alignment` argument into a concrete offset in seconds.
+Translate the `alignment_method` into a concrete offset in seconds.
 
 - `:none`     — no shift (telemetry and video already aligned)
 - `:seed`     — fast: race_t_tel − audio_active_t, no correlation
@@ -268,7 +279,7 @@ function _resolve_alignment(spec, video_path, arrow_path)
         # are independent cross-checks, available in the full align() result if needed.
         return align(video_path, arrow_path).yaw
     else
-        error("Unknown audio_alignment: $spec")
+        error("Unknown alignment_method: $spec")
     end
 end
 
@@ -300,7 +311,7 @@ end
 
 JSON-friendly wrapper around `generate_lap_video`. Required keys: `car`, `lap`
 (and `race`, or omit it to use `[current].race`). Optional keys map to keyword
-arguments (`fps`, `resolution`, `template`, `track`, `audio_alignment`,
+arguments (`fps`, `resolution`, `template`, `track`, `alignment_method`,
 `overwrite`). Returns a result Dict.
 """
 function generate_lap_video_json(config::AbstractDict)
@@ -313,7 +324,7 @@ function generate_lap_video_json(config::AbstractDict)
     haskey(config, "track_map_db")    && (kwargs[:track_map_db]    = config["track_map_db"])
     haskey(config, "fps")             && (kwargs[:fps]             = Int(config["fps"]))
     haskey(config, "resolution")      && (kwargs[:resolution]      = Tuple{Int,Int}(config["resolution"]))
-    haskey(config, "audio_alignment") && (kwargs[:audio_alignment] = _maybe_symbol(config["audio_alignment"]))
+    haskey(config, "alignment_method") && (kwargs[:alignment_method] = _maybe_symbol(config["alignment_method"]))
     haskey(config, "template")        && (kwargs[:template]        = Symbol(config["template"]))
     haskey(config, "overwrite")       && (kwargs[:overwrite]       = Bool(config["overwrite"]))
 

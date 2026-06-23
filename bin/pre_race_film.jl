@@ -121,7 +121,7 @@ function cmd_render(args::Vector{String})
 
     if haskey(opts, "align")
         v = opts["align"]
-        config["audio_alignment"] = (v in ("seed","auto","none")) ? ":" * v : v
+        config["alignment_method"] = (v in ("seed","auto","none")) ? ":" * v : v
     end
 
     result = generate_lap_video_json(config)

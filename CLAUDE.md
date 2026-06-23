@@ -6,8 +6,11 @@ context for code agents.
 
 ## Alignment: telemetry ↔ video offset
 
-Two independent estimators live behind the `audio_alignment` argument
-(`_resolve_alignment` in `src/pipeline.jl`). **Sign convention (both):**
+Two independent estimators live behind the `alignment_method` argument
+(`_resolve_alignment` in `src/pipeline.jl`). The method (`:seed`/`:audio`/
+`:visual`/offset) is required — set it at the entry point or in `race.toml`
+(`alignment_method`, race-wide or per `[cars.N]`); there is no silent default.
+**Sign convention (both):**
 `offset_s` means `telemetry_time = video_time + offset_s`.
 
 - `:auto` — `align_audio_rpm` (`src/alignment.jl`): RPM-from-audio (firing-tone
