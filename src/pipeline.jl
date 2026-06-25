@@ -279,6 +279,208 @@ cfg = getConfig("25SON1")
     )
 end
 
+"""
+    generate_comparison_video(cfg, carA, lapA, carB, lapB;
+                              alignment_method=nothing, fine_tune_s=nothing,
+                              fps=25, resolution=(1280,720),
+                              ranges=default_ranges(), overwrite=false)
+        -> NamedTuple
+
+Render two laps side-by-side with overlaid telemetry. Each driver gets their
+own alignment + fine-tune resolution (same precedence as `generate_lap_video`:
+kwarg → per-car race.toml → race-wide). The faster lap (shorter duration)
+becomes the reference: clip length = faster lap's duration, source audio =
+faster driver, trace colors = green (faster) / red (slower).
+
+Output path: `<output_dir>/<race>_carAvsB_lapL1vsL2_comparison.mp4`.
+"""
+function generate_comparison_video(cfg::RaceConfig,
+                                   carA::Integer, lapA::Integer,
+                                   carB::Integer, lapB::Integer;
+                                   alignment_method = nothing,
+                                   fine_tune_s = nothing,
+                                   fps::Int = 25,
+                                   resolution::Tuple{Int,Int} = (1280, 720),
+                                   ranges = default_ranges(),
+                                   overwrite::Bool = false)
+    sess_A = find_car_session(cfg, carA)
+    sess_B = find_car_session(cfg, carB)
+    output_path = joinpath(cfg.output_dir,
+        "$(cfg.race)_car$(carA)vs$(carB)_lap$(lapA)vs$(lapB)_comparison.mp4")
+    isdir(dirname(output_path)) || mkpath(dirname(output_path))
+    if !overwrite && isfile(output_path)
+        @info "Already rendered, skipping: $output_path  (pass overwrite=true to redo)"
+        return (output_path = output_path, skipped = true)
+    end
+
+    _require_file(sess_A.video, "video"); _require_file(sess_A.arrow, "arrow")
+    _require_file(sess_B.video, "video"); _require_file(sess_B.arrow, "arrow")
+
+    # Per-driver alignment resolution. Same precedence as the single-lap entry
+    # point; the explicit kwarg (if given) applies to BOTH drivers.
+    method_A = something(alignment_method,
+                         car_override(cfg, carA, "alignment_method"),
+                         cfg.alignment_method, Some(nothing))
+    method_B = something(alignment_method,
+                         car_override(cfg, carB, "alignment_method"),
+                         cfg.alignment_method, Some(nothing))
+    (method_A === nothing || method_B === nothing) && error(
+        "No alignment_method for one of the cars (#$carA or #$carB). " *
+        "Pass alignment_method explicitly or set it in race.toml.")
+    ft_A_ov = car_override(cfg, carA, "fine_tune_s")
+    ft_B_ov = car_override(cfg, carB, "fine_tune_s")
+    ft_A = fine_tune_s !== nothing ? Float64(fine_tune_s) :
+           ft_A_ov     !== nothing ? Float64(ft_A_ov)     : 0.0
+    ft_B = fine_tune_s !== nothing ? Float64(fine_tune_s) :
+           ft_B_ov     !== nothing ? Float64(ft_B_ov)     : 0.0
+
+    @info "Comparison: car #$carA lap $lapA  vs  car #$carB lap $lapB → $output_path"
+
+    # Per-driver telemetry, lap window, alignment offset.
+    tel_A  = load_telemetry(sess_A.arrow)
+    tel_B  = load_telemetry(sess_B.arrow)
+    laps_A = detect_laps(tel_A; drop_partial = false)
+    laps_B = detect_laps(tel_B; drop_partial = false)
+    row_A  = findfirst(==(Int(lapA)), laps_A.lap)
+    row_B  = findfirst(==(Int(lapB)), laps_B.lap)
+    row_A === nothing && error("Lap $lapA not found in $(sess_A.arrow)")
+    row_B === nothing && error("Lap $lapB not found in $(sess_B.arrow)")
+    info_A = laps_A[row_A, :]; info_B = laps_B[row_B, :]
+    lap_rows_A_full = info_A.row_start:info_A.row_end
+    lap_rows_B_full = info_B.row_start:info_B.row_end
+    lap_dur_A = info_A.duration; lap_dur_B = info_B.duration
+
+    est_A = _resolve_alignment(method_A, sess_A.video, sess_A.arrow)
+    est_B = _resolve_alignment(method_B, sess_B.video, sess_B.arrow)
+    offset_A = est_A.offset_s + ft_A
+    offset_B = est_B.offset_s + ft_B
+
+    video_lap_start_A = max(0.0, info_A.t_start - offset_A)
+    video_lap_start_B = max(0.0, info_B.t_start - offset_B)
+
+    # Sync: faster driver sets the clip length. Slower driver's tail is cut.
+    faster_id  = faster_driver(lap_dur_A, lap_dur_B)
+    faster_dur = min(lap_dur_A, lap_dur_B)
+    @info "Faster: driver $(faster_id)  (durations  A=$(round(lap_dur_A, digits=2))s  B=$(round(lap_dur_B, digits=2))s  →  clip=$(round(faster_dur, digits=2))s)"
+
+    # Clip each driver's lap rows to ≤ faster_dur of elapsed time, so trace
+    # x-axis represents real seconds and both lines align at every x.
+    lap_rows_A = clip_lap_rows(lap_rows_A_full, lap_dur_A, faster_dur)
+    lap_rows_B = clip_lap_rows(lap_rows_B_full, lap_dur_B, faster_dur)
+
+    channels_A = build_comparison_channels(tel_A, lap_rows_A, ranges)
+    channels_B = build_comparison_channels(tel_B, lap_rows_B, ranges)
+    stats_A    = build_comparison_stats(tel_A, lap_rows_A, ranges)
+    stats_B    = build_comparison_stats(tel_B, lap_rows_B, ranges)
+
+    # Per-driver normalised time within the kept window.  Each goes 0→1 across
+    # their kept rows (which span 0→faster_dur of real time), so at any x both
+    # lines reflect the same number of seconds into the lap.
+    t_raw_A  = Float64.(view(tel_A.time, lap_rows_A))
+    t_raw_B  = Float64.(view(tel_B.time, lap_rows_B))
+    t_norm_A = (t_raw_A .- t_raw_A[1]) ./ faster_dur
+    t_norm_B = (t_raw_B .- t_raw_B[1]) ./ faster_dur
+
+    layout = comparison_layout(resolution[1], resolution[2])
+    driver_A_label = "#$(carA) " * driver_for(cfg, carA)
+    driver_B_label = "#$(carB) " * driver_for(cfg, carB)
+    event_label    = let e = event_label_default(cfg)
+        isempty(e) ? something(auto_detect_track(sess_A.arrow), "") : e
+    end
+
+    static_surface = bake_static_surface_comparison(layout, channels_A, channels_B,
+                                                    t_norm_A, t_norm_B, faster_id,
+                                                    driver_A_label, driver_B_label,
+                                                    event_label)
+
+    frame_surf = CairoARGBSurface(layout.W, layout.H)
+    cr = CairoContext(frame_surf)
+    total_frames = max(1, round(Int, faster_dur * fps))
+    raw_rgba = argbuffer(frame_surf)
+
+    # ── ffmpeg: 3 inputs (videoA, videoB, overlay frames) ───────────────────
+    cmd = String[ffmpeg_exe(), "-y", "-hide_banner", "-loglevel", "error"]
+    append!(cmd, hwaccel_args())
+    append!(cmd, ["-ss", string(video_lap_start_A), "-t", string(faster_dur),
+                  "-i", String(sess_A.video)])
+    append!(cmd, hwaccel_args())
+    append!(cmd, ["-ss", string(video_lap_start_B), "-t", string(faster_dur),
+                  "-i", String(sess_B.video)])
+    append!(cmd, ["-f", "rawvideo", "-pix_fmt", "bgra",
+                  "-s", "$(layout.W)x$(layout.H)", "-r", string(fps),
+                  "-i", "pipe:0",
+                  "-filter_complex",
+                  "[0:v]scale=$(layout.vid_w):$(layout.top_h)[a];" *
+                  "[1:v]scale=$(layout.vid_w):$(layout.top_h)[b];" *
+                  "color=black:$(layout.W)x$(layout.H):r=$(fps)[bg];" *
+                  "[bg][a]overlay=0:0[s1];" *
+                  "[s1][b]overlay=$(layout.vid_w):0[s2];" *
+                  "[s2][2:v]overlay=0:0[v]",
+                  "-map", "[v]",
+                  "-map", faster_id === :A ? "0:a?" : "1:a?"])
+    append!(cmd, encode_args())
+    append!(cmd, ["-c:a", "aac", "-b:a", "192k", "-shortest", String(output_path)])
+    proc = open(Cmd(cmd), "w")
+
+    try
+        nA = length(lap_rows_A); nB = length(lap_rows_B)
+        vals_A  = Vector{Float64}(undef, length(channels_A))
+        vals_B  = Vector{Float64}(undef, length(channels_B))
+        norms_A = Vector{Float64}(undef, length(channels_A))
+        norms_B = Vector{Float64}(undef, length(channels_B))
+        statv_A = Vector{Float64}(undef, length(stats_A))
+        statv_B = Vector{Float64}(undef, length(stats_B))
+
+        for i in 0:(total_frames - 1)
+            tq = i / (total_frames - 1 + eps())
+            # Each driver's index runs over their kept rows independently
+            idxA = tq * (nA - 1) + 1
+            idxB = tq * (nB - 1) + 1
+            iA0 = clamp(floor(Int, idxA), 1, nA - 1); fA = idxA - iA0
+            iB0 = clamp(floor(Int, idxB), 1, nB - 1); fB = idxB - iB0
+
+            for (k, ch) in enumerate(channels_A)
+                vals_A[k]  = ch.data[iA0] * (1 - fA) + ch.data[iA0 + 1] * fA
+                norms_A[k] = ch.norm[iA0] * (1 - fA) + ch.norm[iA0 + 1] * fA
+            end
+            for (k, ch) in enumerate(channels_B)
+                vals_B[k]  = ch.data[iB0] * (1 - fB) + ch.data[iB0 + 1] * fB
+                norms_B[k] = ch.norm[iB0] * (1 - fB) + ch.norm[iB0 + 1] * fB
+            end
+            for (k, st) in enumerate(stats_A)
+                statv_A[k] = st.data[iA0] * (1 - fA) + st.data[iA0 + 1] * fA
+            end
+            for (k, st) in enumerate(stats_B)
+                statv_B[k] = st.data[iB0] * (1 - fB) + st.data[iB0 + 1] * fB
+            end
+            lap_t = tq * faster_dur
+
+            blit_surface!(frame_surf, static_surface)
+            draw_dynamic_comparison!(cr, layout, channels_A, channels_B,
+                                     stats_A, stats_B, faster_id, tq,
+                                     vals_A, vals_B, norms_A, norms_B,
+                                     statv_A, statv_B, lap_t)
+            write(proc.in, reinterpret(UInt8, raw_rgba))
+        end
+    finally
+        close(proc.in)
+        wait(proc)
+    end
+
+    size_mb = isfile(output_path) ? filesize(output_path) / 1e6 : 0.0
+    return (
+        output_path     = String(output_path),
+        file_size_mb    = size_mb,
+        total_frames    = total_frames,
+        A               = (car = Int(carA), lap = Int(lapA), lap_dur_s = lap_dur_A, offset_s = offset_A),
+        B               = (car = Int(carB), lap = Int(lapB), lap_dur_s = lap_dur_B, offset_s = offset_B),
+        faster          = faster_id,
+        clip_dur_s      = faster_dur,
+        encoder         = _caps().nvenc ? :h264_nvenc : :libx264,
+        template        = :comparison,
+    )
+end
+
 # Fail early with a clear message instead of a cryptic Arrow/ffmpeg error downstream.
 _require_file(path::AbstractString, kind::AbstractString) =
     isfile(path) || error("$kind file not found: $path")    #TODO move to config, doesn't belong here

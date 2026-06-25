@@ -21,6 +21,7 @@ include("visual_align2.jl")
 include("render.jl")
 include("render_minimal.jl")
 include("render_raw.jl")
+include("render_comparison.jl")
 include("pipeline.jl")
 
 export detect_laps,
@@ -31,6 +32,7 @@ export detect_laps,
        find_audio_active_start,
        generate_lap_video,
        generate_lap_video_json,
+       generate_comparison_video,
        list_laps_json,
        default_ranges,
        default_db_path,
