@@ -6,15 +6,23 @@ using Statistics
 const CHANNEL_BINDING = (
     time     = :Time,
     lap      = :lap,
-    speed    = :OTD_Conv_Speed,
+    speed    = (:OTD_Conv_Speed, :VectorGPS_Speed, :ChassisVelGPS),
     rpm      = :EngineRotVel,
     gear     = :DriverGearNumber,
     throttle = :EngineThrottlePosition,
     brake    = :BrakePressFront,
     steering = :DriverSteeringAngle,
-    lap_frac = :OTD_Conv_LapFraction,
+    lap_frac = (:OTD_Conv_LapFraction, :VectorGPS_LapFrac),
     loop     = :loop_currently_on,
 )
+
+_resolve_col(cols, sym::Symbol) = sym in cols ? sym : nothing
+function _resolve_col(cols, syms::Tuple)
+    for s in syms
+        s in cols && return s
+    end
+    return nothing
+end
 
 default_ranges() = (
     mph      = :auto,
@@ -22,7 +30,7 @@ default_ranges() = (
     gear     = (0.5, 5.5),
     throttle = (0.0, 100.0),
     brake    = (0.0, 900.0),
-    steering = (-50.0, 50.0),
+    steering = (-185.0, 65.0),
 )
 
 """
@@ -34,22 +42,44 @@ so callers can read additional columns if they want.
 function load_telemetry(arrow_path::AbstractString)
     tbl = Arrow.Table(arrow_path)
     cols = Set(Tables.columnnames(tbl))
-    for (k, sym) in pairs(CHANNEL_BINDING)
-        sym in cols || error("Required column $sym (for $k) not found in $arrow_path")
+    ks  = keys(CHANNEL_BINDING)
+    syms = ntuple(length(ks)) do i
+        k = ks[i]; v = CHANNEL_BINDING[k]
+        r = _resolve_col(cols, v)
+        r === nothing && error("Required column for $k not found in $arrow_path (tried $v)")
+        r
     end
+    resolved = NamedTuple{ks}(syms)
     return (
         table    = tbl,
-        time     = getproperty(tbl, CHANNEL_BINDING.time),
-        lap      = getproperty(tbl, CHANNEL_BINDING.lap),
-        speed    = getproperty(tbl, CHANNEL_BINDING.speed),
-        rpm      = getproperty(tbl, CHANNEL_BINDING.rpm),
-        gear     = getproperty(tbl, CHANNEL_BINDING.gear),
-        throttle = getproperty(tbl, CHANNEL_BINDING.throttle),
-        brake    = getproperty(tbl, CHANNEL_BINDING.brake),
-        steering = getproperty(tbl, CHANNEL_BINDING.steering),
-        lap_frac = getproperty(tbl, CHANNEL_BINDING.lap_frac),
-        loop     = getproperty(tbl, CHANNEL_BINDING.loop),
+        time     = getproperty(tbl, resolved.time),
+        lap      = getproperty(tbl, resolved.lap),
+        speed    = getproperty(tbl, resolved.speed),
+        rpm      = getproperty(tbl, resolved.rpm),
+        gear     = getproperty(tbl, resolved.gear),
+        throttle = getproperty(tbl, resolved.throttle),
+        brake    = getproperty(tbl, resolved.brake),
+        steering = getproperty(tbl, resolved.steering),
+        lap_frac = getproperty(tbl, resolved.lap_frac),
+        loop     = getproperty(tbl, resolved.loop),
     )
+end
+
+"""
+    load_channels(arrow_path, channels...) -> Tuple of Vector{Float64}
+
+Read the named channels as `Float64` and drop every row where ANY of them is
+non-finite (one shared keep-mask), so callers get clean, equal-length signals.
+This is the single NaN guard for telemetry — downstream code assumes finite input.
+"""
+function load_channels(arrow_path::AbstractString, channels::Symbol...)
+    tbl  = Arrow.Table(arrow_path)
+    cols = [Float64.(getproperty(tbl, c)) for c in channels]
+    keep = trues(length(first(cols)))
+    for c in cols
+        keep .&= isfinite.(c)
+    end
+    return Tuple(c[keep] for c in cols)
 end
 
 """
