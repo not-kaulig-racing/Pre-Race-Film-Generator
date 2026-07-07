@@ -17,6 +17,7 @@ const TRACK_KEY_MAP = Dict{String,String}(
     "indianapolis"   => "Indianapolis_Oval",
     "texas"          => "Texas",
     "sonoma"         => "Sonoma",
+    "atlanta"        => "Atlanta",
 )
 
 struct TrackMap
