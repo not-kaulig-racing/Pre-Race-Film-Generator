@@ -181,8 +181,15 @@ function align(video_path::AbstractString, arrow_path::AbstractString;
                rotation_crop = (0.25, 0.50, 0.22, 0.28),
                forward_crop  = (0.18, 0.64, 0.30, 0.34))
     # one read; Float64 + drop rows where any channel is non-finite (guard at the load site).
+    # Speed column name varies by ERDP format (2026 uses :VectorGPS_Speed; older files
+    # use :OTD_Conv_Speed or :ChassisVelGPS) — resolve via the same fallback list
+    # that CHANNEL_BINDING uses instead of hardcoding one name.
+    speed_col = _resolve_col(Set(Tables.columnnames(Arrow.Table(arrow_path))),
+                             CHANNEL_BINDING.speed)
+    speed_col === nothing && error(
+        "No speed column found in $arrow_path (tried $(CHANNEL_BINDING.speed))")
     time, yaw, pitch, speed, roll = load_channels(arrow_path,
-        :Time, :ChassisRotVelYawIDR, :ChassisRotVelPitchIDR, :VectorGPS_Speed, :ChassisRotVelRollIDR)
+        :Time, :ChassisRotVelYawIDR, :ChassisRotVelPitchIDR, speed_col, :ChassisRotVelRollIDR)
 
     # ffmpeg returns a bit more than dur·fps (its -ss seeks to a keyframe just before
     # start_s, decoding some pre-roll); over-allocate so the workers never overflow.

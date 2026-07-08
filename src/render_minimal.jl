@@ -371,10 +371,10 @@ function draw_dynamic_minimal!(cr, layout::OverlayLayout,
         margin = 10
         tw = layout.map_w - 2 * margin
         th = layout.top_h - 2 * margin
-        inset = 0.05
+        fit = _map_fit(tm, tw, th)
         xn, yn = dist_to_map_norm(cur_dist, tm)
-        px = layout.vid_w + margin + (inset + xn * (1 - 2 * inset)) * tw
-        py = margin + (1 - (inset + yn * (1 - 2 * inset))) * th
+        px = layout.vid_w + margin + fit.off_x + xn * fit.inner_w
+        py = margin + fit.off_y + (1 - yn) * fit.inner_h
         if car_graphic !== nothing
             gw = Float64(Cairo.width(car_graphic))
             gh = Float64(Cairo.height(car_graphic))

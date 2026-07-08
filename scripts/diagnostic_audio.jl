@@ -12,9 +12,9 @@ using Serialization, FFTW, Statistics, Plots
 plotly()
 
 # ── what to look at ──────────────────────────────────────────────────────────
-RACE = "25SON1"
-CAR  = 16
-LAP  = 50          # context only — alignment is session-wide
+RACE = "25ATL2"
+CAR  = 42
+LAP  = 218         # context only — alignment is session-wide
 
 # ── alignment knobs (match the production `align_audio_rpm` defaults) ────────
 # SWEEP is derived from signal length below — N samples gives ~N/frame_hz s of
