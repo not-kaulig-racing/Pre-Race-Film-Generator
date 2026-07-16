@@ -287,6 +287,277 @@ cfg = getConfig("25SON1")
 end
 
 """
+    generate_race_video(cfg::RaceConfig, car::Integer;
+                        fps=25, resolution=(1280,720),
+                        track=:auto, track_map_db=default_db_path(),
+                        ranges=default_ranges(), alignment_method=nothing,
+                        fine_tune_s=nothing, overwrite=false, progress=nothing)
+        -> NamedTuple
+
+Single-video full-session render using the `:minimal` layout, with a lap
+counter (`LAP N/M`) in the map panel. The trace strip is re-baked at each lap
+boundary so THROTTLE/BRAKE/STEERING always show the CURRENT lap's data, and
+the red cursor sweeps left→right across each lap independently.
+
+Includes every lap `detect_laps` reports (pit-out, cool-down, partials — the
+user chose `drop_partial = false`). Alignment resolution is the same as
+`generate_lap_video`. Output: `<output_dir>/<race>_car<N>_race.mp4`.
+
+    cfg = getConfig()
+    generate_race_video(cfg, 20; alignment_method = :audio)
+"""
+function generate_race_video(cfg::RaceConfig, car::Integer;
+                             fps::Int = 25,
+                             resolution::Tuple{Int,Int} = (1280, 720),
+                             track::Union{Nothing,Symbol,AbstractString} = :auto,
+                             track_map_db::AbstractString = default_db_path(),
+                             ranges = default_ranges(),
+                             alignment_method = nothing,
+                             fine_tune_s = nothing,
+                             overwrite::Bool = false,
+                             progress::Union{Nothing,Function} = nothing)
+    session     = find_car_session(cfg, car)
+    video_path  = session.video
+    arrow_path  = session.arrow
+    car_number  = Int(car)
+    output_path = joinpath(cfg.output_dir, "$(cfg.race)_car$(car)_race.mp4")
+    isdir(dirname(output_path)) || mkpath(dirname(output_path))
+    if !overwrite && isfile(output_path)
+        @info "Already rendered, skipping: $output_path  (pass overwrite=true to redo)"
+        return (output_path = output_path, skipped = true)
+    end
+    driver_label = driver_for(cfg, car)
+    event_label  = let e = event_label_default(cfg)
+        isempty(e) ? something(auto_detect_track(arrow_path), "") : e
+    end
+
+    method = something(alignment_method,
+                       car_override(cfg, car, "alignment_method"),
+                       cfg.alignment_method, Some(nothing))
+    method === nothing && error(
+        "No alignment_method for car #$car. Choose one explicitly — " *
+        "pass alignment_method = :seed | :audio | :visual | <offset_s>, or set " *
+        "`alignment_method` in race.toml (race-wide or under [cars.$car]).")
+    ft_ov = car_override(cfg, car, "fine_tune_s")
+    fine_tune_s = fine_tune_s !== nothing ? Float64(fine_tune_s) :
+                  ft_ov       !== nothing ? Float64(ft_ov) : 1.0
+    @info "Race render $driver_label car #$car → $output_path"
+
+    _require_file(video_path, "video")
+    _require_file(arrow_path, "arrow")
+    tel = load_telemetry(arrow_path)
+    laps_df = detect_laps(tel; drop_partial = false)
+    isempty(laps_df) && error("No laps detected in $arrow_path")
+    total_laps  = size(laps_df, 1)
+    session_r0  = Int(laps_df.row_start[1])
+    session_r1  = Int(laps_df.row_end[end])
+    t_session_start = Float64(tel.time[session_r0])
+    t_session_end   = Float64(tel.time[session_r1])
+    session_dur = t_session_end - t_session_start
+    session_dur > 0 || error("Non-positive session duration ($session_dur s)")
+
+    est = _resolve_alignment(method, video_path, arrow_path)
+    raw_offset_s = est.offset_s
+    offset_s = raw_offset_s + Float64(fine_tune_s)
+    align_meta = merge((mode = est.method, confidence = est.confidence,
+                        raw_offset_s   = raw_offset_s,
+                        fine_tune_s    = Float64(fine_tune_s),
+                        final_offset_s = offset_s),
+                       est.detail)
+
+    video_start = t_session_start - offset_s
+    video_dur   = session_dur
+    if video_start < 0
+        @warn "Aligned video start clipped to 0" requested=video_start
+        video_dur += video_start
+        video_start = 0.0
+    end
+
+    tm = nothing
+    track_key = nothing
+    if track === :auto || (track isa AbstractString && lowercase(String(track)) == "auto")
+        track_key = auto_detect_track(arrow_path)
+        track_key === nothing &&
+            @warn "Could not auto-detect track from '$arrow_path' — rendering without map."
+    elseif track isa AbstractString
+        track_key = String(track)
+    end
+    if track_key !== nothing
+        tm = load_track_map(track_map_db, track_key)
+        tm === nothing && @warn "Track map not found for '$track_key' — rendering without map."
+    end
+
+    layout = OverlayLayout(W = resolution[1], H = resolution[2])
+    track_surface = tm === nothing ? nothing :
+        bake_track_background(tm, layout.map_w - 20, layout.top_h - 20)
+
+    car_graphic = nothing
+    if tm !== nothing
+        car_graphic = load_car_number_graphic(car_number, CAR_NUMBER_GRAPHIC_H)
+        car_graphic === nothing &&
+            @warn "No car-number graphic found for car #$car_number — falling back to dot."
+    end
+
+    # Per-lap re-bake: build channels, stats, track_dist, and the static
+    # surface for one lap. Kept as a closure so it can capture layout, tel,
+    # ranges, tm etc. without threading them through call args.
+    #
+    # NaN scrub: pre-race / pre-GPS-lock rows carry NaN in some channels
+    # (speed, gear, sometimes throttle). `:full`-race rendering hits these
+    # and the value formatter's `round(Int, NaN)` throws. Replace NaN with
+    # 0.0 in ch.data + ch.norm at build time so those rows render as a flat
+    # baseline instead of crashing.
+    _nan_scrub!(v::AbstractVector) = (replace!(v, NaN => 0.0); v)
+    tel_time = Float64.(tel.time)
+    function build_lap(idx::Int)
+        lap    = laps_df[idx, :]
+        rows   = Int(lap.row_start):Int(lap.row_end)
+        chs    = build_channels_minimal(tel, rows, ranges)
+        sts    = build_stats_minimal(tel, rows, ranges)
+        for ch in chs
+            _nan_scrub!(ch.data)
+            _nan_scrub!(ch.norm)
+        end
+        for st in sts
+            _nan_scrub!(st.data)
+            _nan_scrub!(st.norm)
+        end
+        t_raw  = Float64.(view(tel_time, rows))
+        span   = max(t_raw[end] - t_raw[1], eps())
+        t_norm = (t_raw .- t_raw[1]) ./ span
+        lap_fracs = Float64.(view(tel.lap_frac, rows))
+        td = if tm === nothing
+            zeros(Float64, length(rows))
+        else
+            speed_fts = _nan_scrub!(Float64.(view(tel.speed, rows))) .* (5280.0 / 3600.0)
+            dt        = vcat(0.0, diff(t_raw))
+            anchor_fr = isfinite(lap_fracs[1]) ? lap_fracs[1] - floor(lap_fracs[1]) : 0.0
+            anchor    = anchor_fr * tm.total_dist_ft
+            anchor .+ cumsum(speed_fts .* dt)
+        end
+        surf = bake_static_surface_minimal(layout, chs, t_norm, track_surface,
+                                           driver_label, event_label, sts)
+        return (surf = surf, channels = chs, stats = sts,
+                t_norm = t_norm, track_dist = td, rows = rows,
+                t_start = Float64(lap.t_start), t_end = Float64(lap.t_end),
+                lap_number = Int(lap.lap))
+    end
+
+    frame_surf = CairoARGBSurface(layout.W, layout.H)
+    cr = CairoContext(frame_surf)
+    raw_rgba = argbuffer(frame_surf)
+
+    total_frames = max(1, round(Int, session_dur * fps))
+    output_dir = dirname(abspath(output_path))
+    isdir(output_dir) || mkpath(output_dir)
+
+    @info "race render preflight" total_laps session_r0 session_r1 t_session_start t_session_end session_dur total_frames video_start video_dur offset_s
+
+    cmd = String[ffmpeg_exe(), "-y", "-hide_banner", "-loglevel", "warning"]
+    append!(cmd, hwaccel_args())
+    append!(cmd, ["-ss", string(video_start), "-t", string(video_dur),
+                  "-i", String(video_path),
+                  "-f", "rawvideo", "-pix_fmt", "bgra",
+                  "-s", "$(layout.W)x$(layout.H)", "-r", string(fps),
+                  "-i", "pipe:0",
+                  "-filter_complex",
+                  "[0:v]scale=$(layout.vid_w):$(layout.top_h)[vid];" *
+                  "color=black:$(layout.W)x$(layout.H):r=$(fps)[bg];" *
+                  "[bg][vid]overlay=0:0[bgv];" *
+                  "[bgv][1:v]overlay=0:0[v]",
+                  "-map", "[v]", "-map", "0:a?"])
+    append!(cmd, encode_args())
+    append!(cmd, ["-c:a", "aac", "-b:a", "192k", "-shortest", String(output_path)])
+    proc = open(Cmd(cmd), "w")
+
+    laps_baked = 0
+    try
+        state = build_lap(1)
+        laps_baked = 1
+        cur_lap_idx = 1
+        cur_row     = session_r0
+
+        cur_vals      = Vector{Float64}(undef, length(state.channels))
+        cur_norms     = Vector{Float64}(undef, length(state.channels))
+        cur_stat_vals = Vector{Float64}(undef, length(state.stats))
+
+        for i in 0:(total_frames - 1)
+            frame_t = t_session_start + i / fps
+
+            # Advance cur_row forward to the last row with time ≤ frame_t.
+            while cur_row < session_r1 && tel_time[cur_row + 1] <= frame_t
+                cur_row += 1
+            end
+            # Advance the lap window until frame_t sits inside it (or we run out).
+            while cur_lap_idx < total_laps && cur_row > state.rows[end]
+                cur_lap_idx += 1
+                state = build_lap(cur_lap_idx)
+                laps_baked += 1
+            end
+
+            # Fractional position within this lap for the sample interpolation
+            # AND the cursor's normalized time.
+            n_lap = length(state.rows)
+            local_row = clamp(cur_row - state.rows[1] + 1, 1, n_lap - 1)
+            t0 = tel_time[state.rows[1] + local_row - 1]
+            t1 = tel_time[state.rows[1] + local_row]
+            frac = t1 > t0 ? clamp((frame_t - t0) / (t1 - t0), 0.0, 1.0) : 0.0
+            tq_lap = ((local_row - 1) + frac) / max(n_lap - 1, 1)
+
+            for (k, ch) in enumerate(state.channels)
+                cur_vals[k]  = ch.data[local_row] * (1 - frac) + ch.data[local_row + 1] * frac
+                cur_norms[k] = ch.norm[local_row] * (1 - frac) + ch.norm[local_row + 1] * frac
+            end
+            for (k, st) in enumerate(state.stats)
+                cur_stat_vals[k] = st.data[local_row] * (1 - frac) + st.data[local_row + 1] * frac
+            end
+            cur_dist = tm === nothing ? 0.0 :
+                state.track_dist[local_row] * (1 - frac) +
+                state.track_dist[local_row + 1] * frac
+            lap_elapsed = frame_t - state.t_start
+
+            blit_surface!(frame_surf, state.surf)
+            draw_dynamic_minimal!(cr, layout, state.channels, tq_lap,
+                                  cur_vals, cur_norms, tm, cur_dist,
+                                  lap_elapsed, state.stats, cur_stat_vals,
+                                  car_graphic)
+            draw_lap_counter!(cr, layout, state.lap_number, total_laps)
+            Cairo.flush(frame_surf)
+            if i == 0
+                dbg_png = replace(String(output_path), r"\.mp4$" => "_frame0.png")
+                Cairo.write_to_png(frame_surf, dbg_png)
+                @info "wrote first-frame preview" dbg_png
+            end
+            write(proc, raw_rgba)
+
+            if progress !== nothing && i % 100 == 0
+                progress((frame = i + 1, total = total_frames,
+                          lap = state.lap_number))
+            end
+        end
+    finally
+        close(proc.in)
+        wait(proc)
+    end
+
+    size_mb = filesize(output_path) / 1e6
+    return (
+        output_path     = String(output_path),
+        file_size_mb    = size_mb,
+        total_frames    = total_frames,
+        total_laps      = total_laps,
+        laps_baked      = laps_baked,
+        session_dur_s   = session_dur,
+        audio_offset_s  = offset_s,
+        track_map_used  = tm !== nothing,
+        track_key       = track_key,
+        encoder         = _caps().nvenc ? :h264_nvenc : :libx264,
+        template        = :minimal,
+        alignment       = align_meta,
+    )
+end
+
+"""
     generate_comparison_video(cfg, carA, lapA, carB, lapB;
                               alignment_method=nothing, fine_tune_s=nothing,
                               fps=25, resolution=(1280,720),

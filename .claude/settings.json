@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(julia --project=. -e ' *)",
+      "Bash(ls \"D:/Race_Videos/25NWB1/\" | grep -i \"car16\\\\|_16_\")",
+      "Read(//d/Race_Videos/25NWB1/**)"
+    ]
+  }
+}

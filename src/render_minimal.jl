@@ -400,3 +400,18 @@ function draw_dynamic_minimal!(cr, layout::OverlayLayout,
     move_to(cr, layout.vid_w + 8, 52)
     show_text(cr, @sprintf("%d:%05.2f", mins, secs))
 end
+
+"""
+    draw_lap_counter!(cr, layout, cur_lap, total_laps)
+
+Yellow monospace `LAP N/M` in the map-panel text stack, one row below the lap
+timer at y=52 (driver=18, event=34, timer=52, counter=68).
+"""
+function draw_lap_counter!(cr, layout::OverlayLayout,
+                           cur_lap::Integer, total_laps::Integer)
+    select_font_face(cr, "monospace", Cairo.FONT_SLANT_NORMAL, Cairo.FONT_WEIGHT_BOLD)
+    set_font_size(cr, 14)
+    set_rgb!(cr, colorant"#ffee00")
+    move_to(cr, layout.vid_w + 8, 68)
+    show_text(cr, @sprintf("LAP %d/%d", cur_lap, total_laps))
+end
