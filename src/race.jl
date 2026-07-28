@@ -75,9 +75,9 @@ function list_cars(cfg::RaceConfig)
     isdir(cfg.data_dir) || return cars
     for f in readdir(cfg.data_dir)
         endswith(lowercase(f), ".mpg") || continue
-        m = match(r"car(\d+)"i, f)
-        m === nothing && continue
-        push!(cars, parse(Int, m.captures[1]))
+        c = _car_from_stem(splitext(f)[1])
+        c === nothing && continue
+        push!(cars, c)
     end
     return sort(unique(cars))
 end
@@ -101,8 +101,7 @@ function find_car_session(cfg::RaceConfig, car::Integer)
 
     df = list_session_files(cfg)
     nrow(df) > 0 || error("No session files in $(cfg.data_dir)")
-    pattern = Regex("car0*$(Int(car))(?:[^0-9]|\$)", "i")
-    candidates = filter(r -> occursin(pattern, r.name), eachrow(df))
+    candidates = filter(r -> _car_from_stem(r.name) == Int(car), eachrow(df))
     isempty(candidates) && error("Car #$car not found in $(cfg.data_dir)")
     s = first(candidates)
     s.has_arrow || error("Car #$car has no matching .arrow file (stem=$(s.name))")

@@ -3,7 +3,12 @@
     "allow": [
       "Bash(julia --project=. -e ' *)",
       "Bash(ls \"D:/Race_Videos/25NWB1/\" | grep -i \"car16\\\\|_16_\")",
-      "Read(//d/Race_Videos/25NWB1/**)"
+      "Read(//d/Race_Videos/25NWB1/**)",
+      "Bash(ls \"D:/Race_Videos/25IND1/\" 2>&1)",
+      "Read(//d/Race_Videos/25IND1/**)",
+      "Read(//d/Race_Videos/25IOW1/**)",
+      "Bash(ls \"D:/Race_Videos/25IOW1/\" | head -30)",
+      "Bash(python -c ' *)"
     ]
   }
 }

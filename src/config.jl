@@ -106,20 +106,37 @@ function getConfig(race::AbstractString = ""; arrow_root::AbstractString = "")
         String(get(raw, "date", "")), String(get(raw, "file_stem", "")), drivers, overrides)
 end
 
+# Extract a car number from a filename stem. Handles the two known conventions:
+#   ..._carN_...  — vendor .arrow / re-encoded .mpg (any digits, leading zeros ok)
+#   ICN_...       — raw ERDP in-car .mpg (at stem start, per CLAUDE.md)
+# Returns nothing when the stem matches neither.
+function _car_from_stem(stem::AbstractString)
+    m = match(r"(?:^|[_\-.])(?:car|IC)0*(\d+)(?:$|[^\d])"i, stem)
+    m === nothing ? nothing : parse(Int, m.captures[1])
+end
+
 """
     list_session_files(cfg::RaceConfig) -> DataFrame
 
 Table of `(name, video, arrow, video_size_mb, arrow_size_mb, has_arrow)` for
-every video/arrow pair sharing a stem in the race's data/arrow dirs.
+every in-car video, paired with its arrow by car number (see `_car_from_stem`).
+Videos and arrows with mismatched stems still pair when they resolve to the
+same car — accommodates the raw `IC<N>_…mpg` + vendor `…_carN_….arrow` mix.
 """
 function list_session_files(cfg::RaceConfig)
     mpgs   = sort(filter(f -> endswith(lowercase(f), ".mpg"),   readdir(cfg.data_dir;  join = true)))
     arrows = sort(filter(f -> endswith(lowercase(f), ".arrow"), readdir(cfg.arrow_dir; join = true)))
-    arrow_by_stem = Dict(splitext(basename(a))[1] => a for a in arrows)
+    arrow_by_car = Dict{Int,String}()
+    for a in arrows
+        c = _car_from_stem(splitext(basename(a))[1])
+        c === nothing && continue
+        get!(arrow_by_car, c, a)   # first arrow wins if multiple per car
+    end
     rows = NamedTuple[]
     for v in mpgs
         stem = splitext(basename(v))[1]
-        a = get(arrow_by_stem, stem, "")
+        c = _car_from_stem(stem)
+        a = c === nothing ? "" : get(arrow_by_car, c, "")
         push!(rows, (name = stem, video = v, arrow = a,
                      video_size_mb = round(filesize(v) / 1e6; digits = 1),
                      arrow_size_mb = isempty(a) ? 0.0 : round(filesize(a) / 1e6; digits = 1),
