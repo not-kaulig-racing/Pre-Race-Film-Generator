@@ -6,8 +6,8 @@
 # can carve out a right-side stat column showing boxed MPH / RPM / GEAR
 # values, without disturbing the :full template.
 #
-# Select via `template = :minimal` on generate_lap_video / render_lap /
-# process. The full 6-channel layout remains the default.
+# Select via `template = :minimal` on generate_lap_video / process. The full
+# 6-channel layout remains the default.
 
 const CH_ORDER_MINIMAL = (:THROTTLE, :BRAKE, :STEERING)
 const STAT_ORDER_MINIMAL = (:MPH, :RPM, :GEAR)
@@ -31,7 +31,7 @@ function _find_car_number_file(num::Integer)
 end
 
 """
-    load_car_number_graphic(num, height, backend) -> Union{Nothing, CairoSurface}
+    load_car_number_graphic(num, height) -> Union{Nothing, CairoSurface}
 
 Decode `NCS Car Number Graphics/<num>/<file>` via ffmpeg at the requested
 height (width auto from aspect ratio), then flood-fill near-white pixels
@@ -40,20 +40,17 @@ own fill) is preserved because the flood fill seeds only on the edges.
 Returns nothing if the folder or file is missing. Cached by (num, height).
 """
 function load_car_number_graphic(num::Integer,
-                                 height::Int = CAR_NUMBER_GRAPHIC_H,
-                                 backend = detect_backend())
+                                 height::Int = CAR_NUMBER_GRAPHIC_H)
     key = (Int(num), height)
     haskey(_CAR_NUMBER_CACHE, key) && return _CAR_NUMBER_CACHE[key]
     path = _find_car_number_file(num)
     path === nothing && return nothing
 
-    bytes = with_backend(backend) do exe
-        args = String[exe, "-hide_banner", "-loglevel", "error",
-                      "-i", String(path),
-                      "-vf", "scale=-2:$height",
-                      "-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1"]
-        read(Cmd(args))
-    end
+    args = String[ffmpeg_exe(), "-hide_banner", "-loglevel", "error",
+                  "-i", String(path),
+                  "-vf", "scale=-2:$height",
+                  "-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1"]
+    bytes = read(Cmd(args))
     isempty(bytes) && return nothing
     px_total = length(bytes) ÷ 4
     W = px_total ÷ height
@@ -374,10 +371,10 @@ function draw_dynamic_minimal!(cr, layout::OverlayLayout,
         margin = 10
         tw = layout.map_w - 2 * margin
         th = layout.top_h - 2 * margin
-        inset = 0.05
+        fit = _map_fit(tm, tw, th)
         xn, yn = dist_to_map_norm(cur_dist, tm)
-        px = layout.vid_w + margin + (inset + xn * (1 - 2 * inset)) * tw
-        py = margin + (1 - (inset + yn * (1 - 2 * inset))) * th
+        px = layout.vid_w + margin + fit.off_x + xn * fit.inner_w
+        py = margin + fit.off_y + (1 - yn) * fit.inner_h
         if car_graphic !== nothing
             gw = Float64(Cairo.width(car_graphic))
             gh = Float64(Cairo.height(car_graphic))
@@ -402,4 +399,19 @@ function draw_dynamic_minimal!(cr, layout::OverlayLayout,
     secs = lap_time_s - 60 * mins
     move_to(cr, layout.vid_w + 8, 52)
     show_text(cr, @sprintf("%d:%05.2f", mins, secs))
+end
+
+"""
+    draw_lap_counter!(cr, layout, cur_lap, total_laps)
+
+Yellow monospace `LAP N/M` in the map-panel text stack, one row below the lap
+timer at y=52 (driver=18, event=34, timer=52, counter=68).
+"""
+function draw_lap_counter!(cr, layout::OverlayLayout,
+                           cur_lap::Integer, total_laps::Integer)
+    select_font_face(cr, "monospace", Cairo.FONT_SLANT_NORMAL, Cairo.FONT_WEIGHT_BOLD)
+    set_font_size(cr, 14)
+    set_rgb!(cr, colorant"#ffee00")
+    move_to(cr, layout.vid_w + 8, 68)
+    show_text(cr, @sprintf("LAP %d/%d", cur_lap, total_laps))
 end

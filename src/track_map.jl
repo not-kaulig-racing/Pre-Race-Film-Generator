@@ -3,19 +3,29 @@ using JSON3
 default_db_path() = joinpath(@__DIR__, "..", "Track Maps", "track_map_db.json")
 
 const TRACK_KEY_MAP = Dict{String,String}(
-    "pocono"         => "Pocono",
-    "michigan"       => "MichiganInternationalSpeedway",
-    "dover"          => "Dover",
-    "charlotte"      => "Charlotte_Oval",
-    "talladega"      => "Talladega",
-    "kansas"         => "Kansas",
-    "bristol"        => "Bristol",
-    "martinsville"   => "Martinsville",
-    "las vegas"      => "Las Vegas",
-    "watkins glen"   => "WatkinsGlen",
-    "nashville"      => "NashvilleSuperSpeedway",
-    "indianapolis"   => "Indianapolis_Oval",
-    "texas"          => "Texas",
+    "pocono"           => "Pocono",
+    "michigan"         => "MichiganInternationalSpeedway",
+    "dover"            => "Dover",
+    "charlotte"        => "Charlotte_Oval",
+    "talladega"        => "Talladega",
+    "kansas"           => "Kansas",
+    "bristol"          => "Bristol",
+    "martinsville"     => "Martinsville",
+    "watkins glen"     => "WatkinsGlen",
+    "watkinsglen"      => "WatkinsGlen",
+    "nashville"        => "NashvilleSuperSpeedway",
+    "indianapolis"     => "Indianapolis_Oval",
+    "texas"            => "Texas",
+    "sonoma"           => "Sonoma",
+    "atlanta"          => "Atlanta",
+    "wilkesboro"       => "NorthWilkesboro",
+    "northwilkesboro"  => "NorthWilkesboro",
+    "iowa"             => "IowaSpeedway",
+    "coronado"         => "Coronado",
+    "chicagoland"      => "Chicagoland",
+    "richmond"         => "Richmond",
+    "daytona"          => "Daytona",
+    "darlington"       => "Darlington",
 )
 
 struct TrackMap
@@ -114,6 +124,38 @@ function _arc_length(x::AbstractVector{<:Real}, y::AbstractVector{<:Real},
         s .*= scale
     end
     return s
+end
+
+"""
+    _map_fit(tm, W, H; inset=0.05) -> NamedTuple
+
+Uniform-scale letterbox fit of the track's true (world) aspect ratio into a
+`W`×`H` panel, with `inset` fractional padding on the constraining axis.
+Returns `(inner_w, inner_h, off_x, off_y)`: an `inner_w × inner_h` sub-box
+positioned at `(off_x, off_y)` from the panel's top-left. Independently-
+normalized `(xn, yn) ∈ [0,1]²` (from `x_norm`/`y_norm` or `dist_to_map_norm`)
+map to pixels as `off_x + xn*inner_w`, `off_y + (1 - yn)*inner_h`.
+
+The baked outline AND the per-frame marker must both go through this so the
+marker lands on the outline.
+"""
+function _map_fit(tm::TrackMap, W::Real, H::Real; inset::Float64 = 0.05)
+    xmin, xmax = extrema(tm.x)
+    ymin, ymax = extrema(tm.y)
+    aspect = (xmax - xmin) / (ymax - ymin)   # world dx/dy
+    Wi = W * (1 - 2 * inset)
+    Hi = H * (1 - 2 * inset)
+    if aspect >= Wi / Hi
+        inner_w = Float64(Wi)
+        inner_h = Wi / aspect
+    else
+        inner_h = Float64(Hi)
+        inner_w = Hi * aspect
+    end
+    off_x = (W - inner_w) / 2
+    off_y = (H - inner_h) / 2
+    return (inner_w = inner_w, inner_h = inner_h,
+            off_x   = off_x,   off_y   = off_y)
 end
 
 """

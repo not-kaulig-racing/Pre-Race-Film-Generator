@@ -6,8 +6,9 @@ data_dir   = "D:/Race_Videos/25POC1"          # this week's .mpg videos
 arrow_dir  = "D:/Race_Videos/25POC1"          # this week's .arrow telemetry
 output_dir = "out"                            # rendered overlay .mp4 files
 
-[defaults]
-driver_label    = ""
-event_label     = ""
-fps             = 25
-audio_alignment = "seed"                       # seed | none | auto
+[current]
+race = "25POC1"                               # default race folder for getConfig()
+
+# Per-race settings (event, drivers, alignment_method, per-car overrides) live
+# in <data_dir>/race.toml — see the RaceConfig docs. alignment_method is
+# seed | audio | visual | <offset_s>; there is no silent default.

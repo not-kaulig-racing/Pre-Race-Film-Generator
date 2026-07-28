@@ -201,10 +201,12 @@ function bake_track_background(tm, w::Int, h::Int)
     cr = CairoContext(surf)
     paint_rect!(cr, 0, 0, w, h, colorant"black")
 
-    # Map normalised x/y into the surface with a 5% inset
-    inset = 0.05
-    map_x(xn) = (inset + xn * (1 - 2 * inset)) * w
-    map_y(yn) = (1 - (inset + yn * (1 - 2 * inset))) * h
+    # Uniform-scale letterbox fit so the track keeps its true aspect ratio
+    # inside the panel; the marker draw uses the same _map_fit call to stay
+    # on the outline.
+    fit = _map_fit(tm, w, h)
+    map_x(xn) = fit.off_x + xn * fit.inner_w
+    map_y(yn) = fit.off_y + (1 - yn) * fit.inner_h
 
     set_rgb!(cr, colorant"#666666")
     set_line_width(cr, 2.5)
@@ -274,10 +276,10 @@ function draw_dynamic!(cr, layout::OverlayLayout,
         margin = 10
         tw = layout.map_w - 2 * margin
         th = layout.top_h - 2 * margin
-        inset = 0.05
+        fit = _map_fit(tm, tw, th)
         xn, yn = dist_to_map_norm(cur_dist, tm)
-        px = layout.vid_w + margin + (inset + xn * (1 - 2 * inset)) * tw
-        py = margin + (1 - (inset + yn * (1 - 2 * inset))) * th
+        px = layout.vid_w + margin + fit.off_x + xn * fit.inner_w
+        py = margin + fit.off_y + (1 - yn) * fit.inner_h
         set_rgb!(cr, colorant"#ffee00")
         arc(cr, px, py, 6.0, 0, 2π); fill(cr)
         set_rgb!(cr, colorant"white")
