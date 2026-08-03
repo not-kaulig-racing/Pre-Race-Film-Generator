@@ -1,0 +1,106 @@
+{
+  "Track": {
+    "id": 28,
+    "history_track_id": 159,
+    "nascarone_track_id": 28,
+    "name": "Bowman Gray Stadium",
+    "owner": "City of Winston-Salem",
+    "sponsor_name": "",
+    "surface": "Asphalt",
+    "type": "Short Track",
+    "banking": "Turns: 4",
+    "description": "Located in Winston-Salem, N.C. Mrs. Bill France, Jr. (Betty Jane), was once a beauty queen  there. Grand National (Winston Cup) events were held from 1958 through 1971.Rex White has the most victories with 6.The track's nickname is 'The Madhouse\".",
+    "city": "Winston-Salem",
+    "state": "North Carolina",
+    "frontstretch_length": 0,
+    "backstretch_length": 0,
+    "year_built": 1947,
+    "length": 0.25,
+    "caution_car_speed": 20,
+    "logo": ""
+  },
+  "Track_Configuration": null,
+  "Track_Paths": [
+    {
+      "id": 630,
+      "track_configuration_id": 392,
+      "history_track_path_id": 630,
+      "track_id": 28,
+      "name": "SF",
+      "ordinal_sort_order": 1,
+      "path_data": "M 620.927,618.125L 782.168,618.291C 785.001,618.291 787.835,618.291 811.128,613.524C 834.42,608.756 878.173,599.221 919.216,559.62C 960.259,520.02 998.592,450.353 999.259,379.52C 999.26,379.345 999.262,379.17 999.263,378.995",
+      "length": 0
+    },
+    {
+      "id": 631,
+      "track_configuration_id": 392,
+      "history_track_path_id": 631,
+      "track_id": 28,
+      "name": "L1",
+      "ordinal_sort_order": 2,
+      "path_data": "M 999.263,378.995C 999.743,308.331 962.819,236.587 919.619,196.565C 876.312,156.444 826.698,148.201 799.475,144.079C 772.251,139.958 767.418,139.958 762.585,139.958L 538.585,139.958",
+      "length": 0
+    },
+    {
+      "id": 632,
+      "track_configuration_id": 392,
+      "history_track_path_id": 632,
+      "track_id": 28,
+      "name": "L2",
+      "ordinal_sort_order": 3,
+      "path_data": "M 538.585,139.958L 308.585,139.958C 306.862,139.958 305.14,139.958 279.335,143.472C 253.529,146.986 203.64,154.014 161.529,193.194C 122.383,229.616 89.9577,293.823 86.1215,359.45",
+      "length": 0
+    },
+    {
+      "id": 633,
+      "track_configuration_id": 392,
+      "history_track_path_id": 633,
+      "track_id": 28,
+      "name": "L3",
+      "ordinal_sort_order": 4,
+      "path_data": "M 86.1215,359.45C 85.8309,364.421 85.7044,369.399 85.7513,374.375C 86.418,445.041 122.085,515.041 163.14,555.594C 204.196,596.147 250.64,607.253 275.251,612.802C 299.862,618.352 302.64,618.347 305.418,618.341L 539.852,618.041L 620.927,618.125",
+      "length": 0
+    },
+    {
+      "id": 1040,
+      "track_configuration_id": 392,
+      "history_track_path_id": 219,
+      "track_id": 28,
+      "name": "SF",
+      "ordinal_sort_order": 1,
+      "path_data": "M 620.927,618.125L 782.168,618.291C 785.001,618.291 787.835,618.291 811.128,613.524C 834.42,608.756 878.173,599.221 919.216,559.62C 960.259,520.02 998.592,450.353 999.259,379.52C 999.26,379.345 999.262,379.17 999.263,378.995",
+      "length": 0
+    },
+    {
+      "id": 1041,
+      "track_configuration_id": 392,
+      "history_track_path_id": 220,
+      "track_id": 28,
+      "name": "L1",
+      "ordinal_sort_order": 2,
+      "path_data": "M 999.263,378.995C 999.743,308.331 962.819,236.587 919.619,196.565C 876.312,156.444 826.698,148.201 799.475,144.079C 772.251,139.958 767.418,139.958 762.585,139.958L 538.585,139.958",
+      "length": 0
+    },
+    {
+      "id": 1042,
+      "track_configuration_id": 392,
+      "history_track_path_id": 221,
+      "track_id": 28,
+      "name": "L2",
+      "ordinal_sort_order": 3,
+      "path_data": "M 538.585,139.958L 308.585,139.958C 306.862,139.958 305.14,139.958 279.335,143.472C 253.529,146.986 203.64,154.014 161.529,193.194C 122.383,229.616 89.9577,293.823 86.1215,359.45",
+      "length": 0
+    },
+    {
+      "id": 1043,
+      "track_configuration_id": 392,
+      "history_track_path_id": 222,
+      "track_id": 28,
+      "name": "L3",
+      "ordinal_sort_order": 4,
+      "path_data": "M 86.1215,359.45C 85.8309,364.421 85.7044,369.399 85.7513,374.375C 86.418,445.041 122.085,515.041 163.14,555.594C 204.196,596.147 250.64,607.253 275.251,612.802C 299.862,618.352 302.64,618.347 305.418,618.341L 539.852,618.041L 620.927,618.125",
+      "length": 0
+    }
+  ],
+  "Pit_Paths": []
+}
