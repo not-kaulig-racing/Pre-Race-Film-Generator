@@ -191,36 +191,64 @@ function bake_static_surface(layout::OverlayLayout,
 end
 
 """
-    bake_track_background(tm, w, h) -> CairoSurface
+    bake_track_background(tm, w, h; wp=nothing) -> CairoSurface
 
-Pre-render the static track outline + S/F marker. The dynamic position
-marker is drawn per-frame on top of this.
+Pre-render the static track outline + racing line + S/F marker. The dynamic
+position marker is drawn per-frame on top of this.
+
+Layer order (bottom → top):
+1. `wp` (withPaths bezier track outline) — bold gray. Falls back to the db
+   polyline in bold gray when no withPaths file exists for this track.
+2. `tm` (db polyline) — thin red racing line. Only drawn as a distinct overlay
+   when wp is present (otherwise it IS the outline in layer 1).
+3. Yellow S/F square at the db polyline's start point.
 """
-function bake_track_background(tm, w::Int, h::Int)
+function bake_track_background(tm, w::Int, h::Int;
+                               wp::Union{Nothing,WithPathsMap} = nothing)
     surf = CairoARGBSurface(w, h)
     cr = CairoContext(surf)
     paint_rect!(cr, 0, 0, w, h, colorant"black")
 
-    # Uniform-scale letterbox fit so the track keeps its true aspect ratio
-    # inside the panel; the marker draw uses the same _map_fit call to stay
-    # on the outline.
     fit = _map_fit(tm, w, h)
     map_x(xn) = fit.off_x + xn * fit.inner_w
     map_y(yn) = fit.off_y + (1 - yn) * fit.inner_h
 
-    set_rgb!(cr, colorant"#666666")
-    set_line_width(cr, 2.5)
-    set_line_join(cr, Cairo.CAIRO_LINE_JOIN_ROUND)
-    set_line_cap(cr, Cairo.CAIRO_LINE_CAP_ROUND)
-    move_to(cr, map_x(tm.x_norm[1]), map_y(tm.y_norm[1]))
-    for i in 2:length(tm.x_norm)
-        line_to(cr, map_x(tm.x_norm[i]), map_y(tm.y_norm[i]))
+    # Layer 1 — track outline (bold gray). withPaths beziers if available,
+    # otherwise the db polyline as a fallback.
+    if wp !== nothing
+        stroke_withpaths!(cr, wp, w, h; line_width = 13.0, color = colorant"#cccccc")
+    else
+        set_rgb!(cr, colorant"#cccccc")
+        set_line_width(cr, 13.0)
+        set_line_join(cr, Cairo.CAIRO_LINE_JOIN_ROUND)
+        set_line_cap(cr, Cairo.CAIRO_LINE_CAP_ROUND)
+        move_to(cr, map_x(tm.x_norm[1]), map_y(tm.y_norm[1]))
+        for i in 2:length(tm.x_norm)
+            line_to(cr, map_x(tm.x_norm[i]), map_y(tm.y_norm[i]))
+        end
+        stroke(cr)
     end
-    stroke(cr)
 
-    # S/F marker
+    # Layer 2 — thin red racing line (db polyline), only when wp gave us the
+    # base outline. When there's no withPaths file the polyline already IS the
+    # outline in layer 1, so drawing it again would be redundant.
+    if wp !== nothing
+        set_rgb!(cr, colorant"#ff2222")
+        set_line_width(cr, 1.2)
+        set_line_join(cr, Cairo.CAIRO_LINE_JOIN_ROUND)
+        set_line_cap(cr, Cairo.CAIRO_LINE_CAP_ROUND)
+        move_to(cr, map_x(tm.x_norm[1]), map_y(tm.y_norm[1]))
+        for i in 2:length(tm.x_norm)
+            line_to(cr, map_x(tm.x_norm[i]), map_y(tm.y_norm[i]))
+        end
+        stroke(cr)
+    end
+
+    # Layer 3 — S/F marker at db polyline's start point.
+    sfx = fit.off_x + tm.x_norm[1] * fit.inner_w
+    sfy = fit.off_y + (1 - tm.y_norm[1]) * fit.inner_h
     set_rgb!(cr, colorant"#ffee00")
-    rectangle(cr, map_x(tm.x_norm[1]) - 4, map_y(tm.y_norm[1]) - 4, 8, 8)
+    rectangle(cr, sfx - 4, sfy - 4, 8, 8)
     fill(cr)
 
     return surf

@@ -97,3 +97,17 @@ function probe_video(path::AbstractString)
     nframes = nf == "N/A" ? round(Int, dur * fps) : parse(Int, nf)
     return (duration_s = dur, fps = fps, nframes = nframes)
 end
+
+# Play a two-tone "done" chime. Terminal BEL for anything that supports it,
+# plus a Windows-native two-note beep so it's audible even in muted terminals.
+# Non-blocking (wait=false) and swallows failures — a missing chime should
+# never kill a render.
+function notify_render_done()
+    print("\a"); flush(stdout)
+    Sys.iswindows() && try
+        run(pipeline(`powershell -NoProfile -Command "[console]::beep(880,150); [console]::beep(1174,220)"`;
+                     stdout = devnull, stderr = devnull); wait = false)
+    catch
+    end
+    return nothing
+end
