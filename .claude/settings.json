@@ -9,7 +9,9 @@
       "Read(//d/Race_Videos/25IOW1/**)",
       "Bash(ls \"D:/Race_Videos/25IOW1/\" | head -30)",
       "Bash(python -c ' *)",
-      "Bash(julia --project=. -e 'using PreRaceFilm; PreRaceFilm.notify_render_done\\(\\); println\\(\"OK\"\\)')"
+      "Bash(julia --project=. -e 'using PreRaceFilm; PreRaceFilm.notify_render_done\\(\\); println\\(\"OK\"\\)')",
+      "Bash(ls '//KAULIGNAS/Multimedia/Race Videos/25RIC1' 2>&1 | head -12)",
+      "Read(///KAULIGNAS/Multimedia/Race Videos/**)"
     ]
   }
 }
