@@ -1,0 +1,123 @@
+{
+  "Track": {
+    "id": 211,
+    "history_track_id": 217,
+    "nascarone_track_id": 211,
+    "name": "Los Angeles Memorial Coliseum",
+    "owner": "Los Angeles County",
+    "sponsor_name": "",
+    "surface": "Asphalt",
+    "type": "Short Track",
+    "banking": "",
+    "description": "Quarter-mile, asphalt short track",
+    "city": "Los Angeles",
+    "state": "California",
+    "frontstretch_length": 0,
+    "backstretch_length": 0,
+    "year_built": 2022,
+    "length": 0.25,
+    "caution_car_speed": 0,
+    "logo": "https://df0tqe45whzm6.cloudfront.net/BuschClash24_Primary_CMYK.png"
+  },
+  "Track_Configuration": {
+    "id": 459,
+    "track_id": 211,
+    "history_track_configuration_id": 233,
+    "track_name": "Los Angeles Memorial Coliseum",
+    "altitude": 137.0,
+    "northwest_latitude": 34.0144,
+    "northwest_longitude": -118.2882,
+    "southeast_latitude": 34.0137,
+    "southeast_longitude": -118.2868,
+    "heading": 0.0,
+    "finish_line_rotation": 0.0,
+    "finish_line_translate_x": 531.0,
+    "finish_line_translate_y": 623.5,
+    "pit_finish_line_rotation": 0.0,
+    "pit_finish_line_translate_x": 0.0,
+    "pit_finish_line_translate_y": 0.0
+  },
+  "Track_Paths": [
+    {
+      "id": 788,
+      "track_configuration_id": 459,
+      "history_track_path_id": 788,
+      "track_id": 211,
+      "name": "SF",
+      "ordinal_sort_order": 1,
+      "path_data": "M 534,633.5C 672.339,633.5 845.532,619.868 938,568.5C 1019.59,523.175 1036,437.368 1036,397.5",
+      "length": 3960
+    },
+    {
+      "id": 789,
+      "track_configuration_id": 459,
+      "history_track_path_id": 789,
+      "track_id": 211,
+      "name": "L1",
+      "ordinal_sort_order": 2,
+      "path_data": "M 1036,397.5C 1036,354.188 1010.3,268.517 919,224.5C 831.012,182.081 675.795,180.5 548,180.5",
+      "length": 3960
+    },
+    {
+      "id": 790,
+      "track_configuration_id": 459,
+      "history_track_path_id": 790,
+      "track_id": 211,
+      "name": "L2",
+      "ordinal_sort_order": 3,
+      "path_data": "M 548,180.5C 424.819,180.5 221.514,197.152 140,243.5C 38.3949,301.271 28,366.681 28,411.5",
+      "length": 3960
+    },
+    {
+      "id": 791,
+      "track_configuration_id": 459,
+      "history_track_path_id": 791,
+      "track_id": 211,
+      "name": "L3",
+      "ordinal_sort_order": 4,
+      "path_data": "M 28,411.5C 28,456.684 42.4035,525.179 133,579.5C 205.905,623.213 411.936,633.5 534,633.5",
+      "length": 3960
+    },
+    {
+      "id": 1244,
+      "track_configuration_id": 459,
+      "history_track_path_id": 377,
+      "track_id": 211,
+      "name": "SF",
+      "ordinal_sort_order": 1,
+      "path_data": "M 534,633.5C 672.339,633.5 845.532,619.868 938,568.5C 1019.59,523.175 1036,437.368 1036,397.5",
+      "length": 3960
+    },
+    {
+      "id": 1245,
+      "track_configuration_id": 459,
+      "history_track_path_id": 378,
+      "track_id": 211,
+      "name": "L1",
+      "ordinal_sort_order": 2,
+      "path_data": "M 1036,397.5C 1036,354.188 1010.3,268.517 919,224.5C 831.012,182.081 675.795,180.5 548,180.5",
+      "length": 3960
+    },
+    {
+      "id": 1246,
+      "track_configuration_id": 459,
+      "history_track_path_id": 379,
+      "track_id": 211,
+      "name": "L2",
+      "ordinal_sort_order": 3,
+      "path_data": "M 548,180.5C 424.819,180.5 221.514,197.152 140,243.5C 38.3949,301.271 28,366.681 28,411.5",
+      "length": 3960
+    },
+    {
+      "id": 1247,
+      "track_configuration_id": 459,
+      "history_track_path_id": 380,
+      "track_id": 211,
+      "name": "L3",
+      "ordinal_sort_order": 4,
+      "path_data": "M 28,411.5C 28,456.684 42.4035,525.179 133,579.5C 205.905,623.213 411.936,633.5 534,633.5",
+      "length": 3960
+    }
+  ],
+  "Pit_Paths": []
+}

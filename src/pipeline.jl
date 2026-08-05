@@ -122,6 +122,7 @@ cfg = getConfig("25SON1")
     # fine_tune resolution so the cut lands on the right lap boundary.
     if template === :raw
         raw = render_raw_clip(video_path, video_lap_start, video_lap_dur, output_path)
+        notify_render_done()
         return (
             output_path     = raw.output_path,
             file_size_mb    = raw.file_size_mb,
@@ -152,8 +153,10 @@ cfg = getConfig("25SON1")
     end
 
     layout = OverlayLayout(W = resolution[1], H = resolution[2])
+    wp = tm === nothing || track_key === nothing ? nothing :
+         load_withpaths_map(track_key)
     track_surface = tm === nothing ? nothing :
-        bake_track_background(tm, layout.map_w - 20, layout.top_h - 20)
+        bake_track_background(tm, layout.map_w - 20, layout.top_h - 20; wp = wp)
 
     # Build channels + normalised time
     channels = template === :minimal ?
@@ -271,6 +274,7 @@ cfg = getConfig("25SON1")
     end
 
     size_mb = filesize(output_path) / 1e6
+    notify_render_done()
     return (
         output_path     = String(output_path),
         file_size_mb    = size_mb,
@@ -388,8 +392,10 @@ function generate_race_video(cfg::RaceConfig, car::Integer;
     end
 
     layout = OverlayLayout(W = resolution[1], H = resolution[2])
+    wp = tm === nothing || track_key === nothing ? nothing :
+         load_withpaths_map(track_key)
     track_surface = tm === nothing ? nothing :
-        bake_track_background(tm, layout.map_w - 20, layout.top_h - 20)
+        bake_track_background(tm, layout.map_w - 20, layout.top_h - 20; wp = wp)
 
     car_graphic = nothing
     if tm !== nothing
@@ -541,6 +547,7 @@ function generate_race_video(cfg::RaceConfig, car::Integer;
     end
 
     size_mb = filesize(output_path) / 1e6
+    notify_render_done()
     return (
         output_path     = String(output_path),
         file_size_mb    = size_mb,
@@ -762,6 +769,7 @@ function generate_comparison_video(cfg::RaceConfig,
     end
 
     size_mb = isfile(output_path) ? filesize(output_path) / 1e6 : 0.0
+    notify_render_done()
     return (
         output_path     = String(output_path),
         file_size_mb    = size_mb,

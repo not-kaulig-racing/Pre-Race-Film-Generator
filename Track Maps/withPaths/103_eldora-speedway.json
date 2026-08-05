@@ -1,0 +1,203 @@
+{
+  "Track": {
+    "id": 103,
+    "history_track_id": 208,
+    "nascarone_track_id": 103,
+    "name": "Eldora Speedway",
+    "owner": "Tony Stewart/Stewart Haas Racing",
+    "sponsor_name": "",
+    "surface": "Dirt",
+    "type": "Short Track",
+    "banking": "",
+    "description": "",
+    "city": "Rossburg",
+    "state": "Ohio",
+    "frontstretch_length": 0,
+    "backstretch_length": 0,
+    "year_built": 1954,
+    "length": 0.5,
+    "caution_car_speed": 30,
+    "logo": ""
+  },
+  "Track_Configuration": {
+    "id": 449,
+    "track_id": 103,
+    "history_track_configuration_id": 222,
+    "track_name": "Eldora Speedway",
+    "altitude": 312.0,
+    "northwest_latitude": 40.3205,
+    "northwest_longitude": -84.6353,
+    "southeast_latitude": 40.317,
+    "southeast_longitude": -84.6327,
+    "heading": 96.0,
+    "finish_line_rotation": 0.0,
+    "finish_line_translate_x": 509.1,
+    "finish_line_translate_y": 668.6,
+    "pit_finish_line_rotation": 0.0,
+    "pit_finish_line_translate_x": 0.0,
+    "pit_finish_line_translate_y": 0.0
+  },
+  "Track_Paths": [
+    {
+      "id": 721,
+      "track_configuration_id": 449,
+      "history_track_path_id": 721,
+      "track_id": 103,
+      "name": "SF",
+      "ordinal_sort_order": 1,
+      "path_data": "M 511.668,679.176L 710.809,678.912L 717.344,678.404C 717.344,678.404 755.929,675.021 804.194,656.1",
+      "length": 4236
+    },
+    {
+      "id": 722,
+      "track_configuration_id": 449,
+      "history_track_path_id": 722,
+      "track_id": 103,
+      "name": "L1",
+      "ordinal_sort_order": 2,
+      "path_data": "M 804.194,656.1C 883.397,625.051 988.669,552.158 992.289,383.705",
+      "length": 3948
+    },
+    {
+      "id": 723,
+      "track_configuration_id": 449,
+      "history_track_path_id": 723,
+      "track_id": 103,
+      "name": "L2",
+      "ordinal_sort_order": 3,
+      "path_data": "M 992.289,383.705C 992.346,381.068 992.378,378.408 992.384,375.724C 992.936,276.051 918.738,149.683 749.431,99.3102",
+      "length": 4020
+    },
+    {
+      "id": 724,
+      "track_configuration_id": 449,
+      "history_track_path_id": 724,
+      "track_id": 103,
+      "name": "L3",
+      "ordinal_sort_order": 4,
+      "path_data": "M 749.431,99.3102C 711.742,88.0969 669.34,80.6494 622,78.1003L 498.331,78.1003",
+      "length": 3876
+    },
+    {
+      "id": 725,
+      "track_configuration_id": 449,
+      "history_track_path_id": 725,
+      "track_id": 103,
+      "name": "L4",
+      "ordinal_sort_order": 5,
+      "path_data": "M 498.331,78.1003L 330,78.1003C 282.503,82.4863 242.321,96.1179 208.667,115.591",
+      "length": 3996
+    },
+    {
+      "id": 726,
+      "track_configuration_id": 449,
+      "history_track_path_id": 726,
+      "track_id": 103,
+      "name": "L5",
+      "ordinal_sort_order": 6,
+      "path_data": "M 208.667,115.591C 94.2355,181.805 55.2962,315.557 61,383",
+      "length": 3888
+    },
+    {
+      "id": 727,
+      "track_configuration_id": 449,
+      "history_track_path_id": 727,
+      "track_id": 103,
+      "name": "L6",
+      "ordinal_sort_order": 7,
+      "path_data": "M 61,383C 72.375,515.563 129.688,588.789 190.565,629.225",
+      "length": 4032
+    },
+    {
+      "id": 728,
+      "track_configuration_id": 449,
+      "history_track_path_id": 728,
+      "track_id": 103,
+      "name": "L7",
+      "ordinal_sort_order": 8,
+      "path_data": "M 190.565,629.225C 268.836,681.215 353,679 353,679L 511.668,679.176",
+      "length": 3612
+    },
+    {
+      "id": 1163,
+      "track_configuration_id": 449,
+      "history_track_path_id": 310,
+      "track_id": 103,
+      "name": "SF",
+      "ordinal_sort_order": 1,
+      "path_data": "M 511.668,679.176L 710.809,678.912L 717.344,678.404C 717.344,678.404 755.929,675.021 804.194,656.1",
+      "length": 4236
+    },
+    {
+      "id": 1164,
+      "track_configuration_id": 449,
+      "history_track_path_id": 311,
+      "track_id": 103,
+      "name": "L1",
+      "ordinal_sort_order": 2,
+      "path_data": "M 804.194,656.1C 883.397,625.051 988.669,552.158 992.289,383.705",
+      "length": 3948
+    },
+    {
+      "id": 1165,
+      "track_configuration_id": 449,
+      "history_track_path_id": 312,
+      "track_id": 103,
+      "name": "L2",
+      "ordinal_sort_order": 3,
+      "path_data": "M 992.289,383.705C 992.346,381.068 992.378,378.408 992.384,375.724C 992.936,276.051 918.738,149.683 749.431,99.3102",
+      "length": 4020
+    },
+    {
+      "id": 1166,
+      "track_configuration_id": 449,
+      "history_track_path_id": 313,
+      "track_id": 103,
+      "name": "L3",
+      "ordinal_sort_order": 4,
+      "path_data": "M 749.431,99.3102C 711.742,88.0969 669.34,80.6494 622,78.1003L 498.331,78.1003",
+      "length": 3876
+    },
+    {
+      "id": 1167,
+      "track_configuration_id": 449,
+      "history_track_path_id": 314,
+      "track_id": 103,
+      "name": "L4",
+      "ordinal_sort_order": 5,
+      "path_data": "M 498.331,78.1003L 330,78.1003C 282.503,82.4863 242.321,96.1179 208.667,115.591",
+      "length": 3996
+    },
+    {
+      "id": 1168,
+      "track_configuration_id": 449,
+      "history_track_path_id": 315,
+      "track_id": 103,
+      "name": "L5",
+      "ordinal_sort_order": 6,
+      "path_data": "M 208.667,115.591C 94.2355,181.805 55.2962,315.557 61,383",
+      "length": 3888
+    },
+    {
+      "id": 1169,
+      "track_configuration_id": 449,
+      "history_track_path_id": 316,
+      "track_id": 103,
+      "name": "L6",
+      "ordinal_sort_order": 7,
+      "path_data": "M 61,383C 72.375,515.563 129.688,588.789 190.565,629.225",
+      "length": 4032
+    },
+    {
+      "id": 1170,
+      "track_configuration_id": 449,
+      "history_track_path_id": 317,
+      "track_id": 103,
+      "name": "L7",
+      "ordinal_sort_order": 8,
+      "path_data": "M 190.565,629.225C 268.836,681.215 353,679 353,679L 511.668,679.176",
+      "length": 3612
+    }
+  ],
+  "Pit_Paths": []
+}
