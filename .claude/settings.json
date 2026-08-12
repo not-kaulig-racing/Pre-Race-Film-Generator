@@ -11,7 +11,10 @@
       "Bash(python -c ' *)",
       "Bash(julia --project=. -e 'using PreRaceFilm; PreRaceFilm.notify_render_done\\(\\); println\\(\"OK\"\\)')",
       "Bash(ls '//KAULIGNAS/Multimedia/Race Videos/25RIC1' 2>&1 | head -12)",
-      "Read(///KAULIGNAS/Multimedia/Race Videos/**)"
+      "Read(///KAULIGNAS/Multimedia/Race Videos/**)",
+      "Bash(grep -n \"^function generate_lap_video\\\\|^function generate_race_video\\\\|^function generate_comparison_video\\\\|^end$\" src/pipeline.jl)",
+      "Bash(grep -n \"^function generate_race_video\\\\|^function generate_comparison_video\\\\|^end$\" src/pipeline.jl)",
+      "Bash(grep -n \"^end$\" src/pipeline.jl)"
     ]
   }
 }

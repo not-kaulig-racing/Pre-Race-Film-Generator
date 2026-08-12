@@ -40,6 +40,7 @@ function generate_lap_video(cfg::RaceConfig, car::Integer, lap::Integer;
                             end_loop::Union{Nothing,AbstractString}   = nothing,
                             overwrite::Bool = false,
                             progress::Union{Nothing,Function} = nothing)
+    try
     # ── Resolve from the config ──────────────────────────────────────────────
     session     = find_car_session(cfg, car)
     video_path  = session.video
@@ -53,6 +54,7 @@ function generate_lap_video(cfg::RaceConfig, car::Integer, lap::Integer;
     isdir(dirname(output_path)) || mkpath(dirname(output_path))
     if !overwrite && isfile(output_path)
         @info "Already rendered, skipping: $output_path  (pass overwrite=true to redo)"
+        notify_render_skipped()
         return (output_path = output_path, skipped = true)
     end
     driver_label = driver_for(cfg, car)
@@ -288,6 +290,10 @@ cfg = getConfig("25SON1")
         template        = template,
         alignment       = align_meta,
     )
+    catch e
+        notify_render_failed()
+        rethrow()
+    end
 end
 
 """
@@ -320,6 +326,7 @@ function generate_race_video(cfg::RaceConfig, car::Integer;
                              fine_tune_s = nothing,
                              overwrite::Bool = false,
                              progress::Union{Nothing,Function} = nothing)
+    try
     session     = find_car_session(cfg, car)
     video_path  = session.video
     arrow_path  = session.arrow
@@ -328,6 +335,7 @@ function generate_race_video(cfg::RaceConfig, car::Integer;
     isdir(dirname(output_path)) || mkpath(dirname(output_path))
     if !overwrite && isfile(output_path)
         @info "Already rendered, skipping: $output_path  (pass overwrite=true to redo)"
+        notify_render_skipped()
         return (output_path = output_path, skipped = true)
     end
     driver_label = driver_for(cfg, car)
@@ -562,6 +570,10 @@ function generate_race_video(cfg::RaceConfig, car::Integer;
         template        = :minimal,
         alignment       = align_meta,
     )
+    catch e
+        notify_render_failed()
+        rethrow()
+    end
 end
 
 """
@@ -590,6 +602,7 @@ function generate_comparison_video(cfg::RaceConfig,
                                    resolution::Tuple{Int,Int} = (1280, 720),
                                    ranges = default_ranges(),
                                    overwrite::Bool = false)
+    try
     sess_A = find_car_session(cfg, carA)
     sess_B = find_car_session(cfg, carB)
     loop_sfx    = _loop_suffix(start_loop, end_loop)
@@ -598,6 +611,7 @@ function generate_comparison_video(cfg::RaceConfig,
     isdir(dirname(output_path)) || mkpath(dirname(output_path))
     if !overwrite && isfile(output_path)
         @info "Already rendered, skipping: $output_path  (pass overwrite=true to redo)"
+        notify_render_skipped()
         return (output_path = output_path, skipped = true)
     end
 
@@ -781,6 +795,10 @@ function generate_comparison_video(cfg::RaceConfig,
         encoder         = _caps().nvenc ? :h264_nvenc : :libx264,
         template        = :comparison,
     )
+    catch e
+        notify_render_failed()
+        rethrow()
+    end
 end
 
 # Fail early with a clear message instead of a cryptic Arrow/ffmpeg error downstream.

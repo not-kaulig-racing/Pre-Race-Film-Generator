@@ -216,10 +216,10 @@ function bake_track_background(tm, w::Int, h::Int;
     # Layer 1 — track outline (bold gray). withPaths beziers if available,
     # otherwise the db polyline as a fallback.
     if wp !== nothing
-        stroke_withpaths!(cr, wp, w, h; line_width = 13.0, color = colorant"#cccccc")
+        stroke_withpaths!(cr, wp, w, h; line_width = 20.0, color = colorant"#cccccc")
     else
         set_rgb!(cr, colorant"#cccccc")
-        set_line_width(cr, 13.0)
+        set_line_width(cr, 20.0)
         set_line_join(cr, Cairo.CAIRO_LINE_JOIN_ROUND)
         set_line_cap(cr, Cairo.CAIRO_LINE_CAP_ROUND)
         move_to(cr, map_x(tm.x_norm[1]), map_y(tm.y_norm[1]))

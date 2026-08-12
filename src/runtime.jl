@@ -98,16 +98,77 @@ function probe_video(path::AbstractString)
     return (duration_s = dur, fps = fps, nframes = nframes)
 end
 
-# Play a two-tone "done" chime. Terminal BEL for anything that supports it,
-# plus a Windows-native two-note beep so it's audible even in muted terminals.
-# Non-blocking (wait=false) and swallows failures — a missing chime should
-# never kill a render.
-function notify_render_done()
-    print("\a"); flush(stdout)
-    Sys.iswindows() && try
-        run(pipeline(`powershell -NoProfile -Command "[console]::beep(880,150); [console]::beep(1174,220)"`;
+# Chime sounds. Chest = success, zombie = skipped-because-output-exists,
+# break = render errored out. Absolute paths so PowerShell doesn't have to
+# resolve them via CWD.
+const _CHIME_OPEN   = abspath(joinpath(@__DIR__, "..", "noises", "Chest_open.ogg"))
+const _CHIME_CLOSE  = abspath(joinpath(@__DIR__, "..", "noises", "Chest_close1.ogg"))
+const _CHIME_HURT1  = abspath(joinpath(@__DIR__, "..", "noises", "Zombie_hurt1.ogg"))
+const _CHIME_HURT2  = abspath(joinpath(@__DIR__, "..", "noises", "Zombie_hurt2.ogg"))
+const _CHIME_BREAK  = abspath(joinpath(@__DIR__, "..", "noises", "Random_break.ogg"))
+
+# ffplay.exe alongside ffmpeg.exe. The Gyan.dev build ships both; the JLL
+# fallback doesn't ship ffplay, so this may return "" and we chime differently.
+function _ffplay_exe()
+    fm = ffmpeg_exe()
+    isempty(fm) && return ""
+    fp = joinpath(dirname(fm), Sys.iswindows() ? "ffplay.exe" : "ffplay")
+    return isfile(fp) ? fp : ""
+end
+
+# Fire one or more ogg files back-to-back through ffplay in a background
+# PowerShell so Julia returns immediately. Returns true if the ffplay command
+# was launched, false if we couldn't (missing ffplay or files, non-Windows, or
+# exception) — callers use that to decide whether to fall back to a beep.
+function _play_chimes(files::AbstractString...)
+    Sys.iswindows() || return false
+    fp = _ffplay_exe()
+    (isempty(fp) || !all(isfile, files)) && return false
+    cmd = join(("& \"$(fp)\" -nodisp -autoexit -loglevel quiet \"$f\"" for f in files), "; ")
+    try
+        run(pipeline(`powershell -NoProfile -Command $cmd`;
+                     stdout = devnull, stderr = devnull); wait = false)
+        return true
+    catch
+        return false
+    end
+end
+
+function _fallback_beep(freq1, freq2)
+    try
+        run(pipeline(`powershell -NoProfile -Command "[console]::beep($freq1,150); [console]::beep($freq2,220)"`;
                      stdout = devnull, stderr = devnull); wait = false)
     catch
     end
+end
+
+# Success chime: Chest_open → Chest_close1. Fired at successful render returns.
+# Falls back to a rising two-note beep (880→1174 Hz) if ffplay isn't available.
+function notify_render_done()
+    print("\a"); flush(stdout)
+    _play_chimes(_CHIME_OPEN, _CHIME_CLOSE) && return nothing
+    _fallback_beep(880, 1174)
+    return nothing
+end
+
+# Skip chime: Zombie_hurt1 → Zombie_hurt2. Fired when a render is skipped
+# because the target .mp4 already exists (pass overwrite=true to override).
+# Falls back to a falling two-note beep (440→262 Hz) — deliberately different
+# from the success chime so the ear can distinguish them.
+function notify_render_skipped()
+    print("\a"); flush(stdout)
+    _play_chimes(_CHIME_HURT1, _CHIME_HURT2) && return nothing
+    _fallback_beep(440, 262)
+    return nothing
+end
+
+# Failure chime: Random_break. Fired when a render throws for any reason other
+# than the already-exists skip (which has its own chime). Falls back to a
+# harsh low two-note beep (220→165 Hz) so it's audibly distinct from the
+# other two.
+function notify_render_failed()
+    print("\a"); flush(stdout)
+    _play_chimes(_CHIME_BREAK) && return nothing
+    _fallback_beep(220, 165)
     return nothing
 end
