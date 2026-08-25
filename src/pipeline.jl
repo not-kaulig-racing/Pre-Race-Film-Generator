@@ -149,13 +149,24 @@ cfg = getConfig("25SON1")
     elseif track isa AbstractString
         track_key = String(track)
     end
+    tm_is_synth = false
     if track_key !== nothing
         tm = load_track_map(track_map_db, track_key)
-        tm === nothing && @warn "Track map not found for '$track_key' — rendering without map."
+        if tm === nothing
+            tm = synthesize_trackmap_from_withpaths(track_key)
+            if tm === nothing
+                @warn "Track map not found for '$track_key' (no db polyline, no withPaths file) — rendering without map."
+            else
+                tm_is_synth = true
+                @info "Synthesized track map for '$track_key' from withPaths (no db polyline)."
+            end
+        end
     end
 
     layout = OverlayLayout(W = resolution[1], H = resolution[2])
-    wp = tm === nothing || track_key === nothing ? nothing :
+    # tm_is_synth means tm was BUILT from the withPaths file — drawing the
+    # withPaths overlay on top would be the same shape twice, so skip it.
+    wp = (tm === nothing || track_key === nothing || tm_is_synth) ? nothing :
          load_withpaths_map(track_key)
     track_surface = tm === nothing ? nothing :
         bake_track_background(tm, layout.map_w - 20, layout.top_h - 20; wp = wp)
@@ -298,23 +309,37 @@ end
 
 """
     generate_race_video(cfg::RaceConfig, car::Integer;
+                        template=:minimal, start_lap=nothing, end_lap=nothing,
                         fps=25, resolution=(1280,720),
                         track=:auto, track_map_db=default_db_path(),
                         ranges=default_ranges(), alignment_method=nothing,
                         fine_tune_s=nothing, overwrite=false, progress=nothing)
         -> NamedTuple
 
-Single-video full-session render using the `:minimal` layout, with a lap
-counter (`LAP N/M`) in the map panel. The trace strip is re-baked at each lap
-boundary so THROTTLE/BRAKE/STEERING always show the CURRENT lap's data, and
-the red cursor sweeps left→right across each lap independently.
+Single-video render of a continuous window from one car's session.
 
-Includes every lap `detect_laps` reports (pit-out, cool-down, partials — the
-user chose `drop_partial = false`). Alignment resolution is the same as
-`generate_lap_video`. Output: `<output_dir>/<race>_car<N>_race.mp4`.
+`template = :minimal` (default) uses the minimal overlay with a `LAP N/M`
+counter; the trace strip re-bakes at each lap boundary and the red cursor
+sweeps left→right within each lap. `template = :raw` skips the overlay and
+just cuts the source video for the same window.
+
+`start_lap`/`end_lap` narrow the window to a lap range (inclusive; `nothing`
+means "run to that end of the session"). Full session by default; every lap
+`detect_laps` reports is included (pit-out, cool-down, partials — the user
+chose `drop_partial = false`). Alignment resolution matches `generate_lap_video`.
+
+Outputs (filename encodes the range + template so range renders don't
+collide with the full-session one):
+- Full session, minimal:  `<race>_car<N>_race.mp4`
+- Full session, raw:      `<race>_car<N>_race_raw.mp4`
+- Range, minimal:         `<race>_car<N>_lap<start>-<end>.mp4`   (either bound = "start"/"end" when omitted)
+- Range, raw:             `<race>_car<N>_lap<start>-<end>_raw.mp4`
 
     cfg = getConfig()
     generate_race_video(cfg, 20; alignment_method = :audio)
+    generate_race_video(cfg, 16; start_lap = 343, template = :raw,     alignment_method = :audio)
+    generate_race_video(cfg, 16; start_lap = 343, template = :minimal, fine_tune_s = -0.5,
+                        alignment_method = :audio)
 """
 function generate_race_video(cfg::RaceConfig, car::Integer;
                              fps::Int = 25,
@@ -324,14 +349,33 @@ function generate_race_video(cfg::RaceConfig, car::Integer;
                              ranges = default_ranges(),
                              alignment_method = nothing,
                              fine_tune_s = nothing,
+                             start_lap::Union{Nothing,Integer} = nothing,
+                             end_lap::Union{Nothing,Integer}   = nothing,
+                             template::Symbol = :minimal,
                              overwrite::Bool = false,
                              progress::Union{Nothing,Function} = nothing)
     try
+    template in (:minimal, :raw) ||
+        error("template must be :minimal or :raw for generate_race_video (got $template)")
     session     = find_car_session(cfg, car)
     video_path  = session.video
     arrow_path  = session.arrow
     car_number  = Int(car)
-    output_path = joinpath(cfg.output_dir, "$(cfg.race)_car$(car)_race.mp4")
+    # Filename encodes the lap range when narrowed, so range renders don't
+    # collide with the full-session render:
+    #   full session, minimal:  25RIC1_car16_race.mp4
+    #   full session, raw:      25RIC1_car16_race_raw.mp4
+    #   lap 343→end, minimal:   25RIC1_car16_lap343-end.mp4
+    #   lap 343→400, raw:       25RIC1_car16_lap343-400_raw.mp4
+    range_sfx = if start_lap === nothing && end_lap === nothing
+        "_race"
+    else
+        s = start_lap === nothing ? "start" : string(Int(start_lap))
+        e = end_lap   === nothing ? "end"   : string(Int(end_lap))
+        "_lap$(s)-$(e)"
+    end
+    tmpl_sfx    = template === :raw ? "_raw" : ""
+    output_path = joinpath(cfg.output_dir, "$(cfg.race)_car$(car)$(range_sfx)$(tmpl_sfx).mp4")
     isdir(dirname(output_path)) || mkpath(dirname(output_path))
     if !overwrite && isfile(output_path)
         @info "Already rendered, skipping: $output_path  (pass overwrite=true to redo)"
@@ -360,9 +404,25 @@ function generate_race_video(cfg::RaceConfig, car::Integer;
     tel = load_telemetry(arrow_path)
     laps_df = detect_laps(tel; drop_partial = false)
     isempty(laps_df) && error("No laps detected in $arrow_path")
-    total_laps  = size(laps_df, 1)
-    session_r0  = Int(laps_df.row_start[1])
-    session_r1  = Int(laps_df.row_end[end])
+    total_laps  = size(laps_df, 1)                       # for the LAP N/M counter
+    # Narrow the render window to a lap range when start_lap/end_lap given.
+    # Bounds are inclusive; missing bound = go to that end of the session.
+    range_r0 = 1
+    range_r1 = total_laps
+    if start_lap !== nothing
+        idx = findfirst(l -> l >= Int(start_lap), laps_df.lap)
+        idx === nothing && error("start_lap $start_lap is past the last detected lap ($(laps_df.lap[end]))")
+        range_r0 = idx
+    end
+    if end_lap !== nothing
+        idx = findlast(l -> l <= Int(end_lap), laps_df.lap)
+        idx === nothing && error("end_lap $end_lap is before the first detected lap ($(laps_df.lap[1]))")
+        range_r1 = idx
+    end
+    range_r0 <= range_r1 ||
+        error("Empty lap range: start_lap=$start_lap end_lap=$end_lap resolved to laps $(laps_df.lap[range_r0])..$(laps_df.lap[range_r1])")
+    session_r0  = Int(laps_df.row_start[range_r0])
+    session_r1  = Int(laps_df.row_end[range_r1])
     t_session_start = Float64(tel.time[session_r0])
     t_session_end   = Float64(tel.time[session_r1])
     session_dur = t_session_end - t_session_start
@@ -385,6 +445,25 @@ function generate_race_video(cfg::RaceConfig, car::Integer;
         video_start = 0.0
     end
 
+    # :raw — no overlay, just cut the source video for the range window and
+    # return. Uses the same alignment + fine_tune math the minimal branch does.
+    if template === :raw
+        raw = render_raw_clip(video_path, video_start, video_dur, output_path)
+        notify_render_done()
+        return (
+            output_path     = raw.output_path,
+            file_size_mb    = raw.file_size_mb,
+            session_dur_s   = session_dur,
+            audio_offset_s  = offset_s,
+            first_lap       = Int(laps_df.lap[range_r0]),
+            last_lap        = Int(laps_df.lap[range_r1]),
+            total_laps      = total_laps,
+            encoder         = raw.encoder,
+            template        = :raw,
+            alignment       = align_meta,
+        )
+    end
+
     tm = nothing
     track_key = nothing
     if track === :auto || (track isa AbstractString && lowercase(String(track)) == "auto")
@@ -394,13 +473,24 @@ function generate_race_video(cfg::RaceConfig, car::Integer;
     elseif track isa AbstractString
         track_key = String(track)
     end
+    tm_is_synth = false
     if track_key !== nothing
         tm = load_track_map(track_map_db, track_key)
-        tm === nothing && @warn "Track map not found for '$track_key' — rendering without map."
+        if tm === nothing
+            tm = synthesize_trackmap_from_withpaths(track_key)
+            if tm === nothing
+                @warn "Track map not found for '$track_key' (no db polyline, no withPaths file) — rendering without map."
+            else
+                tm_is_synth = true
+                @info "Synthesized track map for '$track_key' from withPaths (no db polyline)."
+            end
+        end
     end
 
     layout = OverlayLayout(W = resolution[1], H = resolution[2])
-    wp = tm === nothing || track_key === nothing ? nothing :
+    # tm_is_synth means tm was BUILT from the withPaths file — drawing the
+    # withPaths overlay on top would be the same shape twice, so skip it.
+    wp = (tm === nothing || track_key === nothing || tm_is_synth) ? nothing :
          load_withpaths_map(track_key)
     track_surface = tm === nothing ? nothing :
         bake_track_background(tm, layout.map_w - 20, layout.top_h - 20; wp = wp)
@@ -486,9 +576,11 @@ function generate_race_video(cfg::RaceConfig, car::Integer;
 
     laps_baked = 0
     try
-        state = build_lap(1)
+        # Start at the first lap of the range (not always lap 1) so range
+        # renders don't waste a build_lap call on a lap outside their window.
+        state = build_lap(range_r0)
         laps_baked = 1
-        cur_lap_idx = 1
+        cur_lap_idx = range_r0
         cur_row     = session_r0
 
         cur_vals      = Vector{Float64}(undef, length(state.channels))

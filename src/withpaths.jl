@@ -150,6 +150,101 @@ function load_withpaths_map(track_key::AbstractString)
     return WithPathsMap(String(basename(path)), segs, xmin, xmax, ymin, ymax)
 end
 
+# Sample `samples_per_bezier+1` points along one cubic Bézier (start, k/n·end).
+# We include the endpoint but not the start-point (the start point was already
+# emitted by the previous op).
+function _flatten_bezier!(xs::Vector{Float64}, ys::Vector{Float64},
+                          cx::Float64, cy::Float64,
+                          x1::Float64, y1::Float64, x2::Float64, y2::Float64,
+                          ex::Float64, ey::Float64;
+                          samples_per_bezier::Int = 24)
+    @inbounds for k in 1:samples_per_bezier
+        t  = k / samples_per_bezier
+        mt = 1 - t
+        bx = mt^3 * cx + 3*mt^2*t*x1 + 3*mt*t^2*x2 + t^3*ex
+        by = mt^3 * cy + 3*mt^2*t*y1 + 3*mt*t^2*y2 + t^3*ey
+        push!(xs, bx); push!(ys, by)
+    end
+end
+
+# Sort track segments so SF comes first, then L1, L2, ..., Lk. Any other name
+# (shouldn't happen after `_is_track_segment` filter) sorts to the end.
+_seg_sort_key(n::AbstractString) = n == "SF" ? -1 : (startswith(n, "L") ? something(tryparse(Int, n[2:end]), 10^6) : 10^6)
+
+"""
+    synthesize_trackmap_from_withpaths(track_key) -> TrackMap or nothing
+
+Build a `TrackMap` from a withPaths bezier outline when the main track_map_db
+has no polyline for this track (e.g. New Hampshire ships only in withPaths).
+Concatenates SF → L1 → L2 → … → Lk, flattens the beziers to a polyline, and
+scales the arc-length table from image-pixel units to feet using the Track
+length (miles) from the withPaths JSON. Falls back to pixel-unit arc lengths
+if the length is missing — outline still renders correctly; only the marker's
+absolute distance tracking would be off.
+
+Y is flipped so the resulting `y_norm` matches the y-UP convention the rest
+of the renderer expects (image coordinates are y-DOWN).
+"""
+function synthesize_trackmap_from_withpaths(track_key::AbstractString)
+    path = _withpaths_file_for(track_key)
+    path === nothing && return nothing
+    raw = JSON3.read(read(path, String))
+    length_mi = 0.0
+    if haskey(raw, :Track) && haskey(raw[:Track], :length)
+        length_mi = Float64(raw[:Track][:length])
+    end
+    length_ft = length_mi * 5280.0
+
+    # First-occurrence-wins: withPaths files sometimes duplicate SF/L* entries.
+    seg_ops = Dict{String, Vector}()
+    for entry in raw[:Track_Paths]
+        n = String(entry["name"])
+        _is_track_segment(n) || continue
+        haskey(seg_ops, n) && continue
+        seg_ops[n] = _parse_svg_path(String(entry["path_data"]))
+    end
+    isempty(seg_ops) && return nothing
+    ordered = sort!(collect(keys(seg_ops)); by = _seg_sort_key)
+
+    xs = Float64[]; ys = Float64[]
+    cx = cy = NaN
+    for name in ordered
+        for op in seg_ops[name]
+            if length(op) == 3      # M
+                cx, cy = op[1], op[2]
+                push!(xs, cx); push!(ys, cy)
+            elseif length(op) == 2  # L
+                cx, cy = op[1], op[2]
+                push!(xs, cx); push!(ys, cy)
+            elseif length(op) == 6  # C
+                _flatten_bezier!(xs, ys, cx, cy, op[1], op[2], op[3], op[4], op[5], op[6])
+                cx, cy = op[5], op[6]
+            end
+        end
+    end
+    length(xs) < 2 && return nothing
+
+    # Arc length in pixel units, scaled to feet if a real length is available.
+    s_pix = _arc_length(xs, ys, nothing)
+    total_pix = s_pix[end]
+    if length_ft > 0 && total_pix > 0
+        scale = length_ft / total_pix
+        s     = s_pix .* scale
+        total = length_ft
+    else
+        s     = s_pix
+        total = total_pix
+    end
+
+    xmin, xmax = extrema(xs); ymin, ymax = extrema(ys)
+    xn = (xs .- xmin) ./ (xmax - xmin)
+    # Flip y: withPaths uses image-y (down), TrackMap consumers expect y-UP
+    # (bake_track_background applies `1 - yn` when mapping to screen).
+    yn = 1.0 .- (ys .- ymin) ./ (ymax - ymin)
+
+    return TrackMap(String(track_key), xs, ys, s, total, xn, yn)
+end
+
 # Letterbox fit for a withPaths bbox into a `w × h` panel with 5% inset. Mirror
 # of `_map_fit` for db polylines, but with y-DOWN (image coords, no flip).
 function _wp_fit(wp::WithPathsMap, W::Real, H::Real; inset::Float64 = 0.05)

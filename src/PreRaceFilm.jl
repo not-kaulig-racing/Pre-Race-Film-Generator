@@ -13,6 +13,7 @@ using LinearAlgebra: mul!
 include("math.jl")
 include("runtime.jl")
 include("config.jl")
+include("arrow_compat.jl")
 include("telemetry.jl")
 include("race.jl")
 include("track_map.jl")

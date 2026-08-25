@@ -2,7 +2,7 @@
 
 julia_version = "1.12.5"
 manifest_format = "2.0"
-project_hash = "8b22d9bfe7e72e647bc7a911b0f21ea535f3055d"
+project_hash = "9c467ff6d0c805d673ac85a7648c61029df4bc6c"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -959,7 +959,7 @@ uuid = "2dfb63ee-cc39-5dd5-95bd-886bf059d720"
 version = "1.4.3"
 
 [[deps.PreRaceFilm]]
-deps = ["Arrow", "Cairo", "Colors", "DSP", "DataFrames", "FFTW", "JSON3", "LinearAlgebra", "Plotly", "PlotlyBase", "PlotlyKaleido", "Plots", "Printf", "Profile", "Statistics", "TOML", "TableOperations", "Tables"]
+deps = ["Arrow", "Cairo", "Colors", "DSP", "DataFrames", "FFTW", "JSON3", "LinearAlgebra", "Plotly", "PlotlyBase", "PlotlyKaleido", "Plots", "Printf", "Profile", "Revise", "Statistics", "TOML", "TableOperations", "Tables"]
 path = "."
 uuid = "5e1a2b6a-1f6e-4a4f-9c5e-8a1d3f9c0a01"
 version = "0.1.0"
