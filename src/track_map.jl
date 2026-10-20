@@ -28,7 +28,23 @@ const TRACK_KEY_MAP = Dict{String,String}(
     "darlington"       => "Darlington",
     "newhampshire"     => "NewHampshire",
     "loudon"           => "NewHampshire",
+    "wwtr"             => "Gateway",
+    "gateway"          => "Gateway",
+    "worldwide"        => "Gateway",   # matches `_world-wide-technology-raceway.json`
+    "vegas"            => "LasVegas",
+    "lasvegas"         => "LasVegas",  # substring-hits `_las-vegas-motor-speedway.json`
+    "phoenix"          => "Phoenix",   # substring-hits `_phoenix-raceway.json`
+    "phx"              => "Phoenix",
 )
+
+# Tracks whose db polyline is a smooth ellipse that can't rigid-align with the
+# actual stadium/paperclip outline in withPaths. For these, we suppress the
+# thin red "racing line" layer — the outline (bold gray withPaths) and the
+# marker still render normally; only the misleading inscribed-ellipse overlay
+# is skipped.
+const SUPPRESS_RACING_LINE_KEYS = Set(["Bristol", "Kansas", "Charlotte_Oval"])
+should_draw_racing_line(track_key::Union{Nothing,AbstractString}) =
+    track_key !== nothing && !(String(track_key) in SUPPRESS_RACING_LINE_KEYS)
 
 struct TrackMap
     name::String
@@ -38,7 +54,14 @@ struct TrackMap
     total_dist_ft::Float64
     x_norm::Vector{Float64} # 0..1
     y_norm::Vector{Float64} # 0..1
+    # Optional display bbox override for `_map_fit`. When `nothing`, `_map_fit`
+    # uses extrema of x/y (default). When set, it's used verbatim instead —
+    # required after PCA-alignment against a withPaths outline where tm's
+    # actual bbox is inscribed inside wp's, but the marker needs to share
+    # wp's letterbox so it sits on wp's outline.
+    fit_bbox::Union{Nothing,NTuple{4,Float64}}
 end
+TrackMap(name, x, y, s, total, xn, yn) = TrackMap(name, x, y, s, total, xn, yn, nothing)
 
 """
     auto_detect_track(arrow_path) -> String or nothing
@@ -142,8 +165,11 @@ The baked outline AND the per-frame marker must both go through this so the
 marker lands on the outline.
 """
 function _map_fit(tm::TrackMap, W::Real, H::Real; inset::Float64 = 0.05)
-    xmin, xmax = extrema(tm.x)
-    ymin, ymax = extrema(tm.y)
+    xmin, xmax, ymin, ymax = if tm.fit_bbox === nothing
+        (extrema(tm.x)..., extrema(tm.y)...)
+    else
+        tm.fit_bbox   # (xmin, xmax, ymin, ymax) from an align-to-wp step
+    end
     aspect = (xmax - xmin) / (ymax - ymin)   # world dx/dy
     Wi = W * (1 - 2 * inset)
     Hi = H * (1 - 2 * inset)

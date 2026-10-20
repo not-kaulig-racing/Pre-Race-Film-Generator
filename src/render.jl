@@ -204,7 +204,8 @@ Layer order (bottom → top):
 3. Yellow S/F square at the db polyline's start point.
 """
 function bake_track_background(tm, w::Int, h::Int;
-                               wp::Union{Nothing,WithPathsMap} = nothing)
+                               wp::Union{Nothing,WithPathsMap} = nothing,
+                               draw_racing_line::Bool = true)
     surf = CairoARGBSurface(w, h)
     cr = CairoContext(surf)
     paint_rect!(cr, 0, 0, w, h, colorant"black")
@@ -231,8 +232,10 @@ function bake_track_background(tm, w::Int, h::Int;
 
     # Layer 2 — thin red racing line (db polyline), only when wp gave us the
     # base outline. When there's no withPaths file the polyline already IS the
-    # outline in layer 1, so drawing it again would be redundant.
-    if wp !== nothing
+    # outline in layer 1, so drawing it again would be redundant. Also skipped
+    # when the caller opted out (`draw_racing_line=false`) — used for tracks in
+    # SUPPRESS_RACING_LINE_KEYS where the db shape doesn't match wp's shape.
+    if wp !== nothing && draw_racing_line
         set_rgb!(cr, colorant"#ff2222")
         set_line_width(cr, 1.2)
         set_line_join(cr, Cairo.CAIRO_LINE_JOIN_ROUND)

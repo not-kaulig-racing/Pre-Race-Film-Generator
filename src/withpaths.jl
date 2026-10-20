@@ -119,7 +119,6 @@ function load_withpaths_map(track_key::AbstractString)
     path === nothing && return nothing
     raw  = JSON3.read(read(path, String))
     segs = WithPathsSegment[]
-    xmin =  Inf; xmax = -Inf; ymin =  Inf; ymax = -Inf
     seen = Set{String}()   # withPaths files often duplicate SF/L* — take first only
     for entry in raw["Track_Paths"]
         name = String(entry["name"])
@@ -128,25 +127,16 @@ function load_withpaths_map(track_key::AbstractString)
         push!(seen, name)
         ops = _parse_svg_path(String(entry["path_data"]))
         push!(segs, WithPathsSegment(name, ops))
-        # Update bbox by scanning endpoint coords of each op.
-        for op in ops
-            if length(op) == 3        # M (x, y, 0.0 sentinel)
-                x, y = op[1], op[2]
-                xmin = min(xmin, x); xmax = max(xmax, x)
-                ymin = min(ymin, y); ymax = max(ymax, y)
-            elseif length(op) == 2    # L
-                x, y = op[1], op[2]
-                xmin = min(xmin, x); xmax = max(xmax, x)
-                ymin = min(ymin, y); ymax = max(ymax, y)
-            elseif length(op) == 6    # C — bbox uses control + end points
-                for (x, y) in ((op[1], op[2]), (op[3], op[4]), (op[5], op[6]))
-                    xmin = min(xmin, x); xmax = max(xmax, x)
-                    ymin = min(ymin, y); ymax = max(ymax, y)
-                end
-            end
-        end
     end
     isempty(segs) && return nothing
+    # Bbox is measured on the ACTUAL curve (flattened beziers), not on bezier
+    # control points — control-point extents overshoot the visible outline and
+    # would leave a slack margin between the drawn oval and its letterbox,
+    # which broke `align_trackmap_to_withpaths` (the racing line got scaled to
+    # the inflated bbox and overshot the gray outline).
+    tmp = WithPathsMap(String(basename(path)), segs, 0.0, 0.0, 0.0, 0.0)
+    xs, ys = _flatten_withpaths_points(tmp)
+    xmin, xmax = extrema(xs); ymin, ymax = extrema(ys)
     return WithPathsMap(String(basename(path)), segs, xmin, xmax, ymin, ymax)
 end
 
@@ -170,6 +160,158 @@ end
 # Sort track segments so SF comes first, then L1, L2, ..., Lk. Any other name
 # (shouldn't happen after `_is_track_segment` filter) sorts to the end.
 _seg_sort_key(n::AbstractString) = n == "SF" ? -1 : (startswith(n, "L") ? something(tryparse(Int, n[2:end]), 10^6) : 10^6)
+
+# 2D PCA on a point cloud. Returns centroid + principal-axis angle (radians)
+# and the major/minor stddev magnitudes. Track ovals have a clean major/minor
+# split, so the axis it finds is stable.
+function _pca2d(xs::AbstractVector, ys::AbstractVector)
+    n = length(xs)
+    n > 1 || return (cx = 0.0, cy = 0.0, ang = 0.0, major = 1.0, minor = 1.0)
+    cx = sum(xs) / n; cy = sum(ys) / n
+    sxx = 0.0; syy = 0.0; sxy = 0.0
+    @inbounds for i in 1:n
+        dx = xs[i] - cx; dy = ys[i] - cy
+        sxx += dx*dx; syy += dy*dy; sxy += dx*dy
+    end
+    tr = sxx + syy; det = sxx*syy - sxy*sxy
+    disc = sqrt(max(tr*tr/4 - det, 0.0))
+    l1 = tr/2 + disc; l2 = max(tr/2 - disc, 0.0)
+    ex = sxy; ey = l1 - sxx
+    hypot(ex, ey) < 1e-12 && (ex = 1.0; ey = 0.0)
+    return (cx = cx, cy = cy, ang = atan(ey, ex),
+            major = sqrt(max(l1, 0.0)), minor = sqrt(max(l2, 0.0)))
+end
+
+# Flatten `wp`'s beziers into a single point cloud in withPaths coordinates.
+# Same math as `synthesize_trackmap_from_withpaths` — factored so we can PCA
+# without going through the full TrackMap construction.
+function _flatten_withpaths_points(wp::WithPathsMap)
+    xs = Float64[]; ys = Float64[]
+    cx = cy = NaN
+    for seg in wp.segments
+        for op in seg.ops
+            if length(op) == 3      # M
+                cx, cy = op[1], op[2]; push!(xs, cx); push!(ys, cy)
+            elseif length(op) == 2  # L
+                cx, cy = op[1], op[2]; push!(xs, cx); push!(ys, cy)
+            elseif length(op) == 6  # C
+                _flatten_bezier!(xs, ys, cx, cy, op[1], op[2], op[3], op[4], op[5], op[6])
+                cx, cy = op[5], op[6]
+            end
+        end
+    end
+    return xs, ys
+end
+
+"""
+    align_trackmap_to_withpaths(tm, wp) -> TrackMap
+
+Reproject a db polyline `tm` into `wp`'s coordinate frame so the two overlay
+cleanly. Steps: 2D-PCA both point clouds → rotate `tm` so its major axis
+matches `wp`'s (180° ambiguity resolved by nearest-point-to-wp-start) →
+map to `wp`'s bbox exactly with independent per-axis scaling so
+`_map_fit(tm) == _wp_fit(wp)` (marker and outline share one letterbox fit) →
+y-flip the normalized coords so `bake_track_background`'s `(1 - yn)` mapping
+lands the drawn polyline in `wp`'s y-DOWN orientation.
+
+Slight non-uniform scaling is intentional and negligible in practice — track
+aspect ratios agree to within a couple percent (Bristol PCA gave 1.63 vs 1.67).
+"""
+function align_trackmap_to_withpaths(tm, wp::WithPathsMap)
+    wp_x, wp_y = _flatten_withpaths_points(wp)
+    p_tm = _pca2d(tm.x, tm.y)
+    p_wp = _pca2d(wp_x, wp_y)
+
+    # Rotate one point by `theta` around p_tm centroid — no scale yet, so we
+    # can measure the post-rotation extents and pick the right uniform scale.
+    function rotate_only(x::Float64, y::Float64, c::Float64, s::Float64)
+        dx = x - p_tm.cx; dy = y - p_tm.cy
+        return c*dx - s*dy, s*dx + c*dy
+    end
+    # 180° ambiguity: try both, pick the one whose tm's first point (S/F,
+    # by db convention) lands closer to wp's SF segment start once we translate
+    # to wp centroid. Scale doesn't matter for this pick — use 1.0.
+    wp_sf = (wp_x[1], wp_y[1])
+    dsq(a, b) = (a[1] - b[1])^2 + (a[2] - b[2])^2
+    dtheta = p_wp.ang - p_tm.ang
+    thetas = (dtheta, dtheta + Float64(π))
+    scores = map(thetas) do θ
+        c = cos(θ); s = sin(θ)
+        rx, ry = rotate_only(tm.x[1], tm.y[1], c, s)
+        dsq((rx + p_wp.cx, ry + p_wp.cy), wp_sf)
+    end
+    θ = scores[1] <= scores[2] ? thetas[1] : thetas[2]
+
+    # Rotate all points (no scale yet), measure post-rotation extents, and
+    # pick a UNIFORM scale that letterbox-fits tm inside wp's bbox (scale =
+    # min of x/y ratios). Uniform preserves the oval's angle + aspect;
+    # letterbox keeps the racing line INSIDE the outline. Actual extents beat
+    # PCA-eigenvalue-ratio here because stddev ≠ half-extent for non-uniform
+    # samplings (Bristol's db was 44% of wp size under PCA-major scaling).
+    N = length(tm.x)
+    xr = Vector{Float64}(undef, N)
+    yr = Vector{Float64}(undef, N)
+    c = cos(θ); s = sin(θ)
+    @inbounds for i in 1:N
+        xr[i], yr[i] = rotate_only(tm.x[i], tm.y[i], c, s)
+    end
+    xr_lo, xr_hi = extrema(xr); yr_lo, yr_hi = extrema(yr)
+    wp_w = wp.xmax - wp.xmin; wp_h = wp.ymax - wp.ymin
+    scale0 = min(wp_w / max(xr_hi - xr_lo, eps()),
+                 wp_h / max(yr_hi - yr_lo, eps()))
+    xs2 = Vector{Float64}(undef, N)
+    ys2 = Vector{Float64}(undef, N)
+    @inbounds for i in 1:N
+        xs2[i] = xr[i] * scale0 + p_wp.cx
+        ys2[i] = yr[i] * scale0 + p_wp.cy
+    end
+
+    # Direction (chirality): rotation preserves signed area; but the db polyline
+    # may have been digitized in the opposite direction from wp's SF→L1→…→Lk
+    # traversal. If so, the marker (which advances along tm.s monotonically)
+    # would trace the outline backwards. Detect via signed-area sign vs wp's
+    # flattened outline, and if they disagree reverse tm's traversal order.
+    # This is a pure re-parameterization — the outline shape is unchanged.
+    wp_x, wp_y = _flatten_withpaths_points(wp)
+    tm_signed_area = _signed_area(xs2, ys2)
+    wp_signed_area = _signed_area(wp_x, wp_y)
+    if sign(tm_signed_area) != sign(wp_signed_area) && wp_signed_area != 0
+        reverse!(xs2); reverse!(ys2)
+        # Cumulative arc lengths in the reversed direction: at each new index i,
+        # distance from the new start = total − old cumulative-from-original-start.
+        s_reversed = tm.s[end] .- reverse(tm.s)
+        s_out = s_reversed
+    else
+        s_out = tm.s
+    end
+
+    # Normalized 0..1 against wp's bbox (NOT tm's post-align bbox — tm is
+    # uniform-scaled and inscribed inside wp's, so its own extrema would give
+    # a smaller letterbox for the marker than the outline uses). y-flip so
+    # bake's `(1 - yn)` mapping reproduces wp's y-DOWN image orientation.
+    xn = (xs2 .- wp.xmin) ./ max(wp.xmax - wp.xmin, eps())
+    yn = 1.0 .- (ys2 .- wp.ymin) ./ max(wp.ymax - wp.ymin, eps())
+
+    # Explicit `fit_bbox` override so `_map_fit(tm)` returns the same fit as
+    # `_wp_fit(wp)` (the panel-letterbox is computed from wp's bbox). Without
+    # this the marker would move within a smaller box than the wp outline
+    # occupies whenever tm's oval is inscribed in a differently-shaped wp.
+    fit_bbox = (wp.xmin, wp.xmax, wp.ymin, wp.ymax)
+    return TrackMap(tm.name, xs2, ys2, s_out, tm.total_dist_ft, xn, yn, fit_bbox)
+end
+
+# Shoelace signed area — sign tells traversal direction (CW vs CCW in the
+# current coordinate frame). Used to detect chirality mismatches when aligning
+# a db polyline to a withPaths outline.
+function _signed_area(xs::AbstractVector, ys::AbstractVector)
+    n = length(xs); n > 2 || return 0.0
+    s = 0.0
+    @inbounds for i in 1:n
+        j = i == n ? 1 : i + 1
+        s += xs[i]*ys[j] - xs[j]*ys[i]
+    end
+    return s / 2
+end
 
 """
     synthesize_trackmap_from_withpaths(track_key) -> TrackMap or nothing

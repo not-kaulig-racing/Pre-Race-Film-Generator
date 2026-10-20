@@ -149,27 +149,48 @@ cfg = getConfig("25SON1")
     elseif track isa AbstractString
         track_key = String(track)
     end
+    # Load withPaths (outline) first — decides whether tm comes from the db
+    # polyline (aligned into wp's frame as a racing line) or is synthesized
+    # from wp itself (marker rides the outline directly).
+    wp = track_key === nothing ? nothing : load_withpaths_map(track_key)
+
+    # tm resolution:
+    #   - If wp exists AND we're drawing the racing line → load db polyline.
+    #   - Else (or db missing) → synth from wp so the marker rides the outline.
+    # SUPPRESS_RACING_LINE_KEYS (e.g. Bristol: db is a smooth ellipse, wp is a
+    # stadium — no rigid transform overlays them) forces synth so the marker
+    # doesn't cut corners on an invisible mismatched shape.
     tm_is_synth = false
     if track_key !== nothing
-        tm = load_track_map(track_map_db, track_key)
+        if should_draw_racing_line(track_key)
+            tm = load_track_map(track_map_db, track_key)
+        end
         if tm === nothing
             tm = synthesize_trackmap_from_withpaths(track_key)
             if tm === nothing
                 @warn "Track map not found for '$track_key' (no db polyline, no withPaths file) — rendering without map."
             else
                 tm_is_synth = true
-                @info "Synthesized track map for '$track_key' from withPaths (no db polyline)."
+                should_draw_racing_line(track_key) &&
+                    @info "Synthesized track map for '$track_key' from withPaths (no db polyline)."
             end
         end
     end
 
     layout = OverlayLayout(W = resolution[1], H = resolution[2])
-    # tm_is_synth means tm was BUILT from the withPaths file — drawing the
-    # withPaths overlay on top would be the same shape twice, so skip it.
-    wp = (tm === nothing || track_key === nothing || tm_is_synth) ? nothing :
-         load_withpaths_map(track_key)
+    # Align the db polyline into wp's coordinate frame so the racing line
+    # sits on the outline. Skip when tm is already in wp's frame (synth).
+    if wp !== nothing && !tm_is_synth
+        tm = align_trackmap_to_withpaths(tm, wp)
+    end
+    # Draw the racing line only when tm is genuinely a distinct polyline (not
+    # wp-synth, which would duplicate the outline) AND the track isn't on the
+    # suppress list.
+    draw_racing_line = !tm_is_synth && should_draw_racing_line(track_key)
     track_surface = tm === nothing ? nothing :
-        bake_track_background(tm, layout.map_w - 20, layout.top_h - 20; wp = wp)
+        bake_track_background(tm, layout.map_w - 20, layout.top_h - 20;
+                              wp = wp,
+                              draw_racing_line = draw_racing_line)
 
     # Build channels + normalised time
     channels = template === :minimal ?
@@ -194,10 +215,18 @@ cfg = getConfig("25SON1")
     track_dist = if tm === nothing
         zeros(Float64, length(lap_fracs))
     else
-        speed_fts = Float64.(view(tel.speed, lap_rows)) .* (5280.0 / 3600.0)
-        dt        = vcat(0.0, diff(t_raw))
-        anchor    = (lap_fracs[1] - floor(lap_fracs[1])) * tm.total_dist_ft
-        anchor .+ cumsum(speed_fts .* dt)
+        speed_fts   = Float64.(view(tel.speed, lap_rows)) .* (5280.0 / 3600.0)
+        dt          = vcat(0.0, diff(t_raw))
+        integrated  = cumsum(speed_fts .* dt)
+        # Calibrate the physical integrated distance to tm's arc-length domain
+        # so the marker completes exactly one loop per real lap. Nominal track
+        # length (0.533 mi at Bristol) is measured on the outer rim; the real
+        # racing line integrates ~4-5% shorter — without this rescale the dot
+        # stops before S/F. No-op when the two already agree.
+        span = integrated[end]
+        span > 0 && (integrated .*= (tm.total_dist_ft / span))
+        anchor      = (lap_fracs[1] - floor(lap_fracs[1])) * tm.total_dist_ft
+        anchor .+ integrated
     end
 
     static_surface = template === :minimal ?
@@ -473,27 +502,48 @@ function generate_race_video(cfg::RaceConfig, car::Integer;
     elseif track isa AbstractString
         track_key = String(track)
     end
+    # Load withPaths (outline) first — decides whether tm comes from the db
+    # polyline (aligned into wp's frame as a racing line) or is synthesized
+    # from wp itself (marker rides the outline directly).
+    wp = track_key === nothing ? nothing : load_withpaths_map(track_key)
+
+    # tm resolution:
+    #   - If wp exists AND we're drawing the racing line → load db polyline.
+    #   - Else (or db missing) → synth from wp so the marker rides the outline.
+    # SUPPRESS_RACING_LINE_KEYS (e.g. Bristol: db is a smooth ellipse, wp is a
+    # stadium — no rigid transform overlays them) forces synth so the marker
+    # doesn't cut corners on an invisible mismatched shape.
     tm_is_synth = false
     if track_key !== nothing
-        tm = load_track_map(track_map_db, track_key)
+        if should_draw_racing_line(track_key)
+            tm = load_track_map(track_map_db, track_key)
+        end
         if tm === nothing
             tm = synthesize_trackmap_from_withpaths(track_key)
             if tm === nothing
                 @warn "Track map not found for '$track_key' (no db polyline, no withPaths file) — rendering without map."
             else
                 tm_is_synth = true
-                @info "Synthesized track map for '$track_key' from withPaths (no db polyline)."
+                should_draw_racing_line(track_key) &&
+                    @info "Synthesized track map for '$track_key' from withPaths (no db polyline)."
             end
         end
     end
 
     layout = OverlayLayout(W = resolution[1], H = resolution[2])
-    # tm_is_synth means tm was BUILT from the withPaths file — drawing the
-    # withPaths overlay on top would be the same shape twice, so skip it.
-    wp = (tm === nothing || track_key === nothing || tm_is_synth) ? nothing :
-         load_withpaths_map(track_key)
+    # Align the db polyline into wp's coordinate frame so the racing line
+    # sits on the outline. Skip when tm is already in wp's frame (synth).
+    if wp !== nothing && !tm_is_synth
+        tm = align_trackmap_to_withpaths(tm, wp)
+    end
+    # Draw the racing line only when tm is genuinely a distinct polyline (not
+    # wp-synth, which would duplicate the outline) AND the track isn't on the
+    # suppress list.
+    draw_racing_line = !tm_is_synth && should_draw_racing_line(track_key)
     track_surface = tm === nothing ? nothing :
-        bake_track_background(tm, layout.map_w - 20, layout.top_h - 20; wp = wp)
+        bake_track_background(tm, layout.map_w - 20, layout.top_h - 20;
+                              wp = wp,
+                              draw_racing_line = draw_racing_line)
 
     car_graphic = nothing
     if tm !== nothing
@@ -533,11 +583,17 @@ function generate_race_video(cfg::RaceConfig, car::Integer;
         td = if tm === nothing
             zeros(Float64, length(rows))
         else
-            speed_fts = _nan_scrub!(Float64.(view(tel.speed, rows))) .* (5280.0 / 3600.0)
-            dt        = vcat(0.0, diff(t_raw))
-            anchor_fr = isfinite(lap_fracs[1]) ? lap_fracs[1] - floor(lap_fracs[1]) : 0.0
-            anchor    = anchor_fr * tm.total_dist_ft
-            anchor .+ cumsum(speed_fts .* dt)
+            speed_fts  = _nan_scrub!(Float64.(view(tel.speed, rows))) .* (5280.0 / 3600.0)
+            dt         = vcat(0.0, diff(t_raw))
+            integrated = cumsum(speed_fts .* dt)
+            # Per-lap calibration to tm's arc-length domain — see the sibling
+            # comment in `generate_lap_video`. Marker completes exactly one
+            # loop per real lap regardless of nominal-vs-actual length gap.
+            span = integrated[end]
+            span > 0 && (integrated .*= (tm.total_dist_ft / span))
+            anchor_fr  = isfinite(lap_fracs[1]) ? lap_fracs[1] - floor(lap_fracs[1]) : 0.0
+            anchor     = anchor_fr * tm.total_dist_ft
+            anchor .+ integrated
         end
         surf = bake_static_surface_minimal(layout, chs, t_norm, track_surface,
                                            driver_label, event_label, sts)
